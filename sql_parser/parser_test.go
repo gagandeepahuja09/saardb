@@ -87,6 +87,46 @@ func TestParseCreateTable(t *testing.T) {
 			},
 			expectedError: "",
 		},
+		{
+			name:       "Create table with multiple datatypes and primary key as the first column",
+			inputQuery: "CREATE TABLE abc (someNum INT, someStr STRING, someBool BOOL, PRIMARY KEY (someNum))",
+			expectedCreateTable: CreateTable{
+				TableName: "abc",
+				ColumnDetails: []Column{{
+					ColumnName: "someNum",
+					DataType:   Int,
+				},
+					{
+						ColumnName: "someStr",
+						DataType:   String,
+					},
+					{
+						ColumnName: "someBool",
+						DataType:   Bool,
+					}},
+			},
+			expectedError: "",
+		},
+		{
+			name:       "Create table with multiple datatypes and primary key column doesn't exist",
+			inputQuery: "CREATE TABLE abc (someNum INT, someStr STRING, someBool BOOL, PRIMARY KEY (someOtherNum))",
+			expectedCreateTable: CreateTable{
+				TableName: "abc",
+				ColumnDetails: []Column{{
+					ColumnName: "someNum",
+					DataType:   Int,
+				},
+					{
+						ColumnName: "someStr",
+						DataType:   String,
+					},
+					{
+						ColumnName: "someBool",
+						DataType:   Bool,
+					}},
+			},
+			expectedError: "primary key column 'someOtherNum' not found",
+		},
 	}
 
 	for _, tt := range testCases {

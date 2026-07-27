@@ -162,12 +162,13 @@ func (p *Parser) ParseCreateTable() (*CreateTable, error) {
 
 	pkColumnPosition := 0
 	if pkColumn != "" {
+		pkColumnPosition = -1
 		for i, col := range columnDetails {
 			if col.ColumnName == pkColumn {
 				pkColumnPosition = i
 			}
 		}
-		if pkColumnPosition == 0 {
+		if pkColumnPosition == -1 {
 			return nil, fmt.Errorf("primary key column '%s' not found", pkColumn)
 		}
 	}
