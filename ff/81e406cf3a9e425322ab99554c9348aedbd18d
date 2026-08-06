@@ -1,0 +1,19 @@
+sstable/sstable_test.go
+  s_db6f27d5c5c062::t_484795b0dd33f2 1-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "ff81e406cf3a9e425322ab99554c9348aedbd18d",
+  "prompts": {},
+  "sessions": {
+    "s_db6f27d5c5c062": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f2cb4-2c44-7c22-8b14-20876c112083",
+        "model": "unknown"
+      },
+      "human_author": "gagandeepahuja09 <gagandeepahuja09@gmail.com>"
+    }
+  }
+}
