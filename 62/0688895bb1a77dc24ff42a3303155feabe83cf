@@ -1,0 +1,36 @@
+README.md
+  h_67b5b423f5fb35 1-3,5,7,9,11,13,15-26,29,31-36,38,40,42-48,50-55,57,59-61,64-102,104
+db/db.go
+  h_67b5b423f5fb35 31,182,186-214,216-218,222-225,227-234,251-260,262-265,268-272
+db/transaction.go
+  h_67b5b423f5fb35 22-26,38-40,164-165,168-169,171-173,178-185,187-201,203,207,209,212-215,222-227,230-231
+db/wal_command_test.go
+  h_67b5b423f5fb35 1-190
+docs/blog/part1.md
+  h_67b5b423f5fb35 1-510
+docs/blog/part2.md
+  h_67b5b423f5fb35 503-510,526
+docs/blog/part3.md
+  h_67b5b423f5fb35 1-5
+docs/open-source-contribution-notes.md
+  h_67b5b423f5fb35 1-150
+docs/tidesdb-contribution-roadmap.md
+  h_67b5b423f5fb35 1-273
+main.go
+  h_67b5b423f5fb35 28
+sql_parser/parser.go
+  h_67b5b423f5fb35 165,171
+sql_parser/parser_test.go
+  h_67b5b423f5fb35 90-129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "620688895bb1a77dc24ff42a3303155feabe83cf",
+  "prompts": {},
+  "humans": {
+    "h_67b5b423f5fb35": {
+      "author": "gagandeepahuja09 <gagandeepahuja09@gmail.com>"
+    }
+  }
+}
