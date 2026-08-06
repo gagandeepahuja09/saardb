@@ -1,0 +1,14 @@
+docs/journal/part_9_sql_v3.md
+  h_67b5b423f5fb35 125-133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "2112f575b976664b57c6fe8689cae91946bc991b",
+  "prompts": {},
+  "humans": {
+    "h_67b5b423f5fb35": {
+      "author": "gagandeepahuja09 <gagandeepahuja09@gmail.com>"
+    }
+  }
+}
