@@ -1,0 +1,16 @@
+docs/journal/part_mvcc.md
+  h_67b5b423f5fb35 12,17,20,22,24,26-27,29,31,33-35,37-40,42,44-45,47-49,52,54,56,58,63-110,112-124,203-211,213
+docs/journal/part_mvcc_claude_commentary.md
+  h_67b5b423f5fb35 1-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "58865a4e11db762391f89f1af2dde7da28122319",
+  "prompts": {},
+  "humans": {
+    "h_67b5b423f5fb35": {
+      "author": "gagandeepahuja09 <gagandeepahuja09@gmail.com>"
+    }
+  }
+}
