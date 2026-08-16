@@ -9,53 +9,119 @@ In blog 4 we discussed and implemented SERIALIZABLE isolation. The problem is th
 
 Most production systems use isolation levels like REPEATABLE READ and READ COMMITTED by default. Postgres uses READ COMMITTED as the default isolation level while MySQL uses REPEATABLE READ. 
 
-In the upcoming blogs, we will take a dig at implementing READ COMMITTED isolation which is the default isolation and in the process also explore MVCC. 
+In the current blog, we will take a dig at implementing both READ COMMITTED and REPEATABLE READ isolation levels and in the process also explore MVCC. 
 
 ## Why 2PL has low adoption?
 2PL is a major performance bottleneck due to the fact that readers block writers and writers block readers. Most production user-facing systems are read-heavy in nature. In read-heavy applications, if we are able to ensure that readers and writers are not blocked on each other and only two writers are blocked on each other, we can gain major performance improvements. Let's take an example to solidify what we are saying. If 90% of the database traffic is going to be read traffic, then with 2PL, read transactions would be blocked on some write transaction most of the time. On the other hand, if read transactions don't require a read lock, 90% of our traffic is unaffected by the performance bottleneck due to locks.
 
-While write-write conflicts are non-avoidable in nature, read-write conflicts can be avoided. We will soon see on why write-write conflicts are non-avoidable.
+While write-write conflicts are non-avoidable in nature, read-write conflicts can be avoided.
 
 ## Write Locks
-Write locks are non-negotiable for any application be it with or without databases.
+Write locks are non-negotiable for any application be it with or without databases. The same concept of shared variable in programming applies here. A "key" is a shared variable and if a transaction was updating some key-value pair and another transaction intervened in between and updated the same key, it would lead to inconsistent or unexpected result for the first transaction as the rest of the operations within the transaction and the final result after commit were operating with the assumption that the PUT operation in first transaction was successful with the expected value.
 
-What are dirty writes and why write locks are non-negotiable.
-
-
-## Read Uncommitted
-Go over this in greater detail, implement it and show implementation details.
+Given that write locks are unavoidable, we will try to see if it is possible to remove read locks.
 
 ## Read Committed
-Read committed isolation level. We can implement read committed just by utilising write locks and buffered writes.
 
-The only difference between this and 2PL is that there won't be any read lock. Write lock would still be there and we would write everything to the database only during commit. Before that, the writes are stored in memory in specific buffer maps specific to the transaction.
+### No Dirty Reads
+The only guarantee provided by Read Committed is that there are no dirty (or uncommitted) reads. There are multiple isolation anomalies and we only walked through three of them in blog 4.
 
+Out of all the isolation anomalies, Read Committed only solves for one: dirty reads.
+
+In order to ensure that we are always reading committed data, we can keep an in-memory write buffer visible only to the respective transaction. Those values are only visible to other transactions post commit.
+
+If we correlate this to blog 4, this is very much similar to the 2 phase-locking which we implemented with the only difference being that we stop taking any read locks so that readers and writers are not blocked on each other.
+
+Let's do a dry-run to prove that this solves the dirty read isolation anomaly.
 ```
-  GET "payment_123" returns "5000"
-  T2 
+  Transaction T1
+    GET "payment_123" returns "5000"
+  
+  Transaction T2 
     BEGIN
-
-    GET "payment_123" returns "5000" outside T2
+    GET "payment_123" returns "5000" for Transaction T1
     PUT "payment_123" "10000" 
-    GET "payment_123" returns "5000" outside T2
+    GET "payment_123" returns "5000" for Transaction T1
+    GET "payment_123" returns "10000" for Transaction T2
     COMMIT
-  GET "payment_123" returns "10000"
+  
+  Transaction T1
+    GET "payment_123" returns "10000"
 ```
 
-As you can see in above example, we are always reading committed data which is the key requirement for READ COMMITTED isolation level.
+In the above example, transaction T1 always reads committed data which is guaranteed by a combination of in-memory buffer for transaction T2 and write-lock acquired by T2 during PUT operation.
 
-While the above approach works well for implementing READ COMMITTED in a key-value store, it is not sufficient for a relational database. This is because of multi-row reads.
+### Other Issues Solved By READ COMMITTED In Production Databases
 
-Above GET example is a single row read which is an atomic operation. On the other hand, SELECT can read multiple rows which are multiple atomic operations composed sequentially. Due to this, it is possible that we are reading 1 row before a commit and 1 row after a commit.
+While, this solves the requirements for READ COMMITTED isolation level, this is not generally how Postgres and MySQL implement this isolation level. Let's take a few examples to understand why:
 
-Let's take an example.
+Let's look at following SELECT query:
 ```sql
   SELECT * FROM accounts WHERE id IN (1, 2, 3);
 ```
 
-We know exactly which 3 rows to read. But we read them sequentially: row 1, then row 2, then row 3. Between reading row 1 and row 3, row 3 could be modified by another transaction. The result becomes a mix of two database states.
+We read 3 rows sequentially. Between reading row 1, 2 and 3, row 3 could be modified by another transaction. The result becomes a mix of two database states.
 
-Example:
+Above GET example is a single row read which is an atomic operation. On the other hand, SELECT can read multiple rows which are multiple atomic operations composed sequentially. Due to this, it is possible that we are reading 1 row before a commit and 1 row after a commit. This leads to us not reading a consistent database state. Ideally, we would want to read a consistent database state which was there when the SELECT query start and not influenced by writes happening in between.
+
+A natural question that emerges is that, why is it necessary to read a consistent database state?
+
+Let's take a could of real production examples to understand why: 
+
+**Example 1: Checkout from cart**
+Assume that you have a checkout service computing the final order value basis the price and quantity of items in cart. The query would look like:
+```sql
+  SELECT SUM(p.price * c.quantity) as total
+  FROM cart_items c
+  JOIN products p ON c.product_id = p.id
+  WHERE c.cart_id = 'abc';
+```
+cart_items would require running a JOIN with products table to get the price of the product.
+
+A background job or an admin could be applying discount on any of the products. Leading to its price changing:
+
+```sql
+  UPDATE products SET price = price * 0.8 WHERE id IN (1, 2, 3, 4, 7, 8, 15);
+```
+All of the readers having any of the respective product in cart at that time and checking out the product would run the above SELECT query. While the SELECT query is running, the UPDATE query is also running in parallel for the common product_id(s). Some product could have old price as the SELECT for that row was first before UPDATE and some could have the new price as the SELECT for that row was fired after UPDATE. 
+This could lead to a price which the buyer didn't expect and a loss of revenue for the seller as the buyer had seen and agreed to the price before the discount.
+Update could also be for removing discounts, leading to a higher price that what the buyer thought and hence poor buyer experience.
+
+In both cases, the product experience would have been correct and better if we had a consistent database state for the SELECT query as if no UPDATE query was running.
+
+**Example 2: Check Pending Settlement For Merchant**
+
+Payment gateway aggregators requirements like Stripe and Razorpay require carrying out settlements for merchants and also showing a view of pending and cleared settlements.
+
+A SELECT query like below could be running to show the merchant a view of their pending settlement amount.
+```sql
+  SELECT SUM(amount) as pending_settlement_amount
+  FROM settlements
+  WHERE merchant_id = 5 AND status = 'pending';
+```
+
+Parallely, a background job could be running to update the settlement status of the settlements which are not pending.
+```sql
+  UPDATE ledger_entries SET status = 'cleared' WHERE merchant_id = 5 AND settlement_id IN (4, 7, 10);
+```
+
+Assuming that there were 10 pending settlements for merchant_id "5" in above example when the SELECT query was fired. Out of the 10, 3 were updated by the background job. But since, both were running in parallel, it is possible that out of the 3 whose status was changed as cleared, the SELECT query had already read 2 of the rows as pending and for the remaining, the status was read as cleared and hence was removed from SUM(amount).
+
+In this case as well, the merchant saw a settlement SUM which was not theoretically possible as either all of its 3 settlements should have been cleared together or all of them could be pending.
+
+This inconsistent view can cause reporting problem for the merchant.
+
+### Need For Consistent Snapshot
+Both these examples show why it is important to have a consistent snapshot view of the database and why this is especially a problem in multi-row reads.
+
+A consistent snapshot means that SELECT queries are able to take a snapshot of the database at the start of the query itself and relying on that instead of the result being impacted by an UPDATE or INSERT or DELETE running in parallel.
+
+We could solve this problem by take explicit locks during reads as well but that comes at the cost of: 
+
+1. Peformance
+2. Developer Burden: Developers need to think about whether this use case requires viewing a consistent snapshot or not. If developers miss out on any edge-cases, it could lead to subtle bugs in the system which are bound to happen at scale.
+
+To solve for these problems, both MySQL and Postgres ensure that a consistent snapshot of the database is available during reads even if this requirement is not a strict adherence for READ COMMITTED isolation level. And both Postgres and MySQL except this or even a more stricter isolation level to be default for their databases.
 
 Go over this in greater detail, implement it and show implementation details.
 Mention that we can check blog 4 for recap on dirty reads.
@@ -134,9 +200,17 @@ Now, when we are going through files, we need to take care of multiple active tr
 
 When we are deleting old value, we cannot delete something which is visible to an active transaction. If something is visible to the oldest active transaction, it must be visible to all transactions.
 
-But we don't need to keep all visible ones. Else, we won't be able to delete anything. Out of the visible ones, pick the highest transaction_id which is less than oldest active transaction id.
+But we don't need to keep all visible ones. Else, we won't be able to delete anything. Out of the visible ones for a key, pick the highest transaction_id which is less than oldest active transaction id.
 
-Let's say that the 
+Let's say that the oldest active transaction id = 55
+
+If during compaction, 
+current_id >= 55 --> keep
+current_id < 55 --> keep only the newest xid (just less than 55)
+
+How to find this txn_id which is just less than the oldest active transaction id. Maintain a max variable. 
+
+We would need to maintain a map of key to the max active transaction id seen which is less than the oldest active txn_id. Along with that, we also need to store the entire row value in the map.
 
 ## Non-repeatable read
 
