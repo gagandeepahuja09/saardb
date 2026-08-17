@@ -1,0 +1,14 @@
+docs/journal/part_mvcc.md
+  h_67b5b423f5fb35 126-235
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "8d9a3e123a87e9e0397d5269a4fa774335ef2a9d",
+  "prompts": {},
+  "humans": {
+    "h_67b5b423f5fb35": {
+      "author": "gagandeepahuja09 <gagandeepahuja09@gmail.com>"
+    }
+  }
+}
