@@ -123,6 +123,116 @@ We could solve this problem by take explicit locks during reads as well but that
 
 To solve for these problems, both MySQL and Postgres ensure that a consistent snapshot of the database is available during reads even if this requirement is not a strict adherence for READ COMMITTED isolation level. And both Postgres and MySQL except this or even a more stricter isolation level to be default for their databases.
 
+## MVCC (Multi-Version Concurrency Control)
+There are two ways to provide a consistent snapshot of the database during reads:
+1. Locking writes
+2. Maintaining version of each write.
+
+We already discarded approach 1 due to performance constraints. We will be understanding approach 2 in greater details which is exactly what MVCC does.
+
+Assume every write in the database is tagged with a transaction ID. This transaction ID (aka version) is an always increasing number. Higher the transaction ID, the more recently the transaction started. 
+Now assume that before starting a SELECT query, we record the current transaction ID as its snapshot. During the scan, we only reads values whose transaction ID is less than or equal to the snapshot. This way, we are effectively seeing the database as it was when the query began, ignoring any concurrent writes.
+
+Let's do a dry run of this:
+```sql
+  T1 (TID=11): SELECT * FROM users WHERE id IN (1, 2, 3)
+
+  Database state:
+    id=1, name="Alice",   written by TID=5  ← TID 5 <= 11, visible ✓
+    id=2, name="Bob",     written by TID=8  ← TID 8 <= 11, visible ✓
+    id=3, name="Charlie", written by TID=8  ← TID 8 <= 11, visible ✓
+
+  T2 (TID=12): UPDATE users SET name="David" WHERE id=3
+    → creates new version: id=3, name="David", written by TID=12
+
+  T1 continues scanning:
+    id=3 has two versions:
+      TID=12: 12 > 11 → INVISIBLE
+      TID=8:  8 <= 11 → VISIBLE, return "Charlie"
+
+  Result: Alice, Bob, Charlie ✓ (consistent, unaffected by T2) 
+```
+
+As can be seen in the above example, since T2 (TID = 12) did not affect the result of the query as TID = 11 < 12 and hence TID = 12 is invidisible to transaction T1.
+
+Let's take another example:
+
+```sql
+
+  Assume that TID=10 is already running but not yet committed
+  (TID=10): UPDATE users SET name="David" WHERE id=3
+
+  T1 (TID=11): SELECT * FROM users WHERE id IN (1, 2, 3)
+
+  Database state:
+    id=1, name="Alice",   written by TID=5  ← TID 5 <= 11, visible ✓
+    id=2, name="Bob",     written by TID=8  ← TID 8 <= 11, visible ✓
+    id=3, name="Charlie", written by TID=8  ← TID 8 <= 11, visible ✓
+
+  T1 continues scanning and :
+    id=3 has two versions:
+      TID=12: 12 > 11 → INVISIBLE
+      TID=8:  8 <= 11 → VISIBLE, return "Charlie"
+
+  Result: Alice, Bob, Charlie ✓ (consistent, unaffected by T2) 
+```
+
+The above example doesn't cover cases where a transaction is already active before the read started. T1 has transaction ID = 11 but let's say transaction ID = 7 is still active. If TID = 7 is committed during the time T1 is active, it could impact the result of T1.
+Hence, apart from checking transaction ID version, we should also check for active transactions. If a transaction is active, we should not read that key-value pair.
+
+A version is only visible if the transaction ID of the key-value pair we are interested in reading is:
+1. Less than or equal to the transaction ID of the current version to be read.
+2. Not an active transaction. 
+
+## Implementing MVCC
+Let's tie this up to how we can implement MVCC.
+
+### Write Path
+
+**Write To SSTable**
+Given that SSTables already are append-only in nature, we don't require maintaining separate versions. The only difference is that while writing the key-value pair, we also write a version or transaction_id as part of the serialised value itself.
+
+**Write to Memtable**
+The above approach doesn't work with memtable as it stores a key-value pair only once. Since one key can have only one associated value in a memtable, we would have to store the version in the memtable key itself.
+
+In order to generalise it, we can keep version as part of key for both memtable and SSTable.
+
+For both table writes and secondary indexes writes we need to have the version as part of the key.
+
+### Read Path
+
+#### GET Path
+The read order remains the same: we first check for memtable. If not found in memtable, we check from the newest SSTable to the oldest SSTable.
+
+**Memtable Search**
+While searching in memtable, we need to carry out a prefix-scan for the respective key. Since the data is sorted, the oldest version would be present first.
+
+During regular GET, if a key is found in memtable, we don't need to check the SSTable. In this case as well, the newest version would always exist on memtable.
+
+We will first carry out a prefix scan in memtable for the required key and check from the newest version to the oldest. We can also apply binary search in a way such that we only check less than or equal to the read version. The first version that we encounter that is not an active version is the required key-value pair.
+
+If the required key is not found in Memtable, we would need to search in SSTable.
+
+**SSTable Search**
+
+The first version
+
+**SELECT Path**
+
+**SELECT Index Path**
+
+Once we pull that 
+
+But memtable only has one value.
+
+What happens to indexes.
+
+Internal Note: Why active transactions should not be a global variable?
+
+### Compaction Path
+
+### Operational, Storage, Latency Overhead
+
 Go over this in greater detail, implement it and show implementation details.
 Mention that we can check blog 4 for recap on dirty reads.
 
