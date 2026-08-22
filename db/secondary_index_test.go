@@ -120,14 +120,14 @@ func TestSecondaryIndexBasedQueries(t *testing.T) {
 			TableName: "t1",
 			QueryConditions: []sqlparser.QueryCondition{
 				{
-					ColumnName: "c3",
-					QueryType:  sqlparser.Equals,
-					Value:      fmt.Sprintf("%d", i%5),
-				},
-				{
 					ColumnName: "c4",
 					QueryType:  sqlparser.Equals,
 					Value:      fmt.Sprintf("%d", i%2),
+				},
+				{
+					ColumnName: "c3",
+					QueryType:  sqlparser.Equals,
+					Value:      fmt.Sprintf("%d", i%5),
 				},
 			},
 		})

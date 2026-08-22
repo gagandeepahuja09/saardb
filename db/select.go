@@ -132,12 +132,6 @@ func (db *DB) getQueryResultFromSecondaryIndexIfApplicable(tableName string, sel
 		return db.runFullTableScanAndFilterConditions(tableName, selectFromTableInput)
 	}
 	indexCoveredColValues := []string{}
-	// this is a bug. index prefix should be built with column value order as per the order of columns
-	// in the chosen secondary index and that too limited to to the columns covered in the secondary index.
-	// instead of this, we were just taking all of the columns in the input.
-	// this was problematic due to:
-	// 1. only a subset of columns could be covered in the chosen secondary index.
-	// 2. the column order in secondary index is what is actually inserted, the select query should also run prefix scan on the same order
 
 	for _, colName := range colsCoveredInSecIndex {
 		for _, condition := range selectFromTableInput.QueryConditions {
