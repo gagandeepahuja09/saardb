@@ -1,0 +1,14 @@
+db/secondary_index_test.go
+  h_67b5b423f5fb35 123,125,128,130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "25423d4809e5e6ce477bc7a14de21bfd99f86f03",
+  "prompts": {},
+  "humans": {
+    "h_67b5b423f5fb35": {
+      "author": "gagandeepahuja09 <gagandeepahuja09@gmail.com>"
+    }
+  }
+}
