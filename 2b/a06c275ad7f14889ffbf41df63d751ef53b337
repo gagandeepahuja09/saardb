@@ -1,0 +1,16 @@
+db/select.go
+  h_67b5b423f5fb35 44-47,49,134-147,149
+docs/journal/part_create_index.md
+  h_67b5b423f5fb35 1-3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "2ba06c275ad7f14889ffbf41df63d751ef53b337",
+  "prompts": {},
+  "humans": {
+    "h_67b5b423f5fb35": {
+      "author": "gagandeepahuja09 <gagandeepahuja09@gmail.com>"
+    }
+  }
+}
