@@ -1,0 +1,3 @@
+`CREATE INDEX` is similar to `CREATE TABLE` with the fact that we persist the secondary index catalog. But there is an interesting case to be handled in `CREATE INDEX` which is not possible in `CREATE TABLE`. `CREATE INDEX` can be run at any stage of the table even when there are millions of rows while `CREATE TABLE` only runs when the table is created.
+
+This leads to us requiring backfill. And running backfill means we are firing multiple PUT operations on `_indexes:<table_name>` on a table potentially having millions of rows. While this backfill is happening, the keys could also get updated.

@@ -41,15 +41,12 @@ func getSecondaryIndexForQueryIfApplicable(selectFromTableInput sqlparser.Select
 	colsCoveredInCandidateSecondaryIndex := []string{}
 	for _, secondaryIndex := range secondaryIndexes {
 		secIdxColsCoveredFromInputQuery := []string{}
+		inputQueryColumn := map[string]bool{}
+		for _, qc := range selectFromTableInput.QueryConditions {
+			inputQueryColumn[qc.ColumnName] = true
+		}
 		for _, secIdxCol := range secondaryIndex.Columns {
-			colFoundInInputQuery := false
-			for _, qc := range selectFromTableInput.QueryConditions {
-				if qc.ColumnName == secIdxCol {
-					colFoundInInputQuery = true
-					break
-				}
-			}
-			if colFoundInInputQuery {
+			if inputQueryColumn[secIdxCol] {
 				secIdxColsCoveredFromInputQuery = append(secIdxColsCoveredFromInputQuery, secIdxCol)
 			} else {
 				// we are going through each column in the secondary index sequentially
@@ -134,11 +131,16 @@ func (db *DB) getQueryResultFromSecondaryIndexIfApplicable(tableName string, sel
 	if secondaryIndex == nil {
 		return db.runFullTableScanAndFilterConditions(tableName, selectFromTableInput)
 	}
-	columnValues := []string{}
-	for _, condition := range selectFromTableInput.QueryConditions {
-		columnValues = append(columnValues, condition.Value)
+	indexCoveredColValues := []string{}
+
+	for _, colName := range colsCoveredInSecIndex {
+		for _, condition := range selectFromTableInput.QueryConditions {
+			if condition.ColumnName == colName {
+				indexCoveredColValues = append(indexCoveredColValues, condition.Value)
+			}
+		}
 	}
-	prefixKey := getSecondaryIndexKeyOrPrefix(tableName, secondaryIndex.IndexName, columnValues, "")
+	prefixKey := getSecondaryIndexKeyOrPrefix(tableName, secondaryIndex.IndexName, indexCoveredColValues, "")
 	primaryKeyIds, err := db.secondaryIndexPrefixScan(prefixKey)
 	if err != nil {
 		return nil, err

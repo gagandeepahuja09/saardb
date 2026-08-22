@@ -418,13 +418,10 @@ func (st *SsTable) sequentiallyScanTableAndUpdateMap(ssTableFile *os.File, table
 		}
 		i += (4 + len(value))
 
-		fmt.Printf("key3333: %+v\n", key)
-		fmt.Printf("value3333: %+v\n", value)
 		if strings.HasPrefix(key, tableKey) {
 			// only set the key value pair if the key is not found
 			// this is because we are sequentially going through the newest file first
 			if _, ok := (tableMap[key]); !ok {
-				fmt.Printf("REACH_22222 %v %v\n", key, value)
 				tableMap[key] = value
 			}
 		} else {
