@@ -161,8 +161,23 @@ func (db *DB) getQueryResultFromSecondaryIndexIfApplicable(tableName string, sel
 		colsCoveredInSecIndex, queryResult)
 }
 
-// todo: without index scan, AND queries support to be added.
 func (db *DB) selectFromTable(selectFromTableInput sqlparser.SelectFromTable) ([][]string, error) {
+	txn, err := db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	res, err := txn.selectFromTable(selectFromTableInput)
+	if err != nil {
+		txn.Rollback()
+		return nil, err
+	}
+	err = txn.Commit()
+	return res, err
+}
+
+// todo: without index scan, AND queries support to be added.
+func (txn *Transaction) selectFromTable(selectFromTableInput sqlparser.SelectFromTable) ([][]string, error) {
+	db := txn.db
 	tableName := selectFromTableInput.TableName
 	schema, ok := db.tableNameVsSchemaMap[selectFromTableInput.TableName]
 	pkPos := schema.PrimaryKeyColumnPosition

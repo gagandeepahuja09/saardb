@@ -121,6 +121,10 @@ func (db *DB) Close() {
 	// todo: close all sstable files
 }
 
+func (txn *Transaction) Get(key string) (value string, err error) {
+
+}
+
 func (db *DB) Get(key string) (value string, err error) {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
