@@ -1,0 +1,14 @@
+docs/journal/part_mvcc.md
+  h_67b5b423f5fb35 60,117,131,156,158-160,164-165,174-176,178-180,182,185-190,192-203,221,232-249,252-293,296-299,301,303,305,307,309-311,315-321,431-441
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "df2c215af34f51f60a3e8a60b1ef28b11401143a",
+  "prompts": {},
+  "humans": {
+    "h_67b5b423f5fb35": {
+      "author": "gagandeepahuja09 <gagandeepahuja09@gmail.com>"
+    }
+  }
+}
