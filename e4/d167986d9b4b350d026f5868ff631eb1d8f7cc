@@ -1,0 +1,16 @@
+db/db.go
+  h_67b5b423f5fb35 124-127
+db/select.go
+  h_67b5b423f5fb35 165-180
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "e4d167986d9b4b350d026f5868ff631eb1d8f7cc",
+  "prompts": {},
+  "humans": {
+    "h_67b5b423f5fb35": {
+      "author": "gagandeepahuja09 <gagandeepahuja09@gmail.com>"
+    }
+  }
+}
