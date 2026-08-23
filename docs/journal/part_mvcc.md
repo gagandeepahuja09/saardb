@@ -57,7 +57,7 @@ While, this solves the requirements for READ COMMITTED isolation level, this is 
 
 Let's look at following SELECT query:
 ```sql
-  SELECT * FROM accounts WHERE id IN (1, 2, 3);
+  SELECT * FROM users WHERE id IN (1, 2, 3);
 ```
 
 We read 3 rows sequentially. Between reading row 1, 2 and 3, row 3 could be modified by another transaction. The result becomes a mix of two database states.
@@ -114,7 +114,7 @@ This inconsistent view can cause reporting problem for the merchant.
 ### Need For Consistent Snapshot
 Both these examples show why it is important to have a consistent snapshot view of the database and why this is especially a problem in multi-row reads.
 
-A consistent snapshot means that SELECT queries are able to take a snapshot of the database at the start of the query itself and relying on that instead of the result being impacted by an UPDATE or INSERT or DELETE running in parallel.
+A consistent snapshot means that SELECT queries are able to take a snapshot of the database at the start of the query itself. The SELECT query then relies on the snapshot result instead of the result being impacted by an UPDATE or INSERT or DELETE running in parallel.
 
 We could solve this problem by take explicit locks during reads as well but that comes at the cost of: 
 
@@ -128,7 +128,7 @@ There are two ways to provide a consistent snapshot of the database during reads
 1. Locking writes
 2. Maintaining version of each write.
 
-We already discarded approach 1 due to performance constraints. We will be understanding approach 2 in greater details which is exactly what MVCC does.
+We already discarded approach 1 due to performance constraints. We will be understanding approach 2 in greater detail which is exactly what MVCC does.
 
 Assume every write in the database is tagged with a transaction ID. This transaction ID (aka version) is an always increasing number. Higher the transaction ID, the more recently the transaction started. 
 Now assume that before starting a SELECT query, we record the current transaction ID as its snapshot. During the scan, we only reads values whose transaction ID is less than or equal to the snapshot. This way, we are effectively seeing the database as it was when the query began, ignoring any concurrent writes.
@@ -153,14 +153,16 @@ Let's do a dry run of this:
   Result: Alice, Bob, Charlie ✓ (consistent, unaffected by T2) 
 ```
 
-As can be seen in the above example, since T2 (TID = 12) did not affect the result of the query as TID = 11 < 12 and hence TID = 12 is invidisible to transaction T1.
+As can be seen in the above example, T2 (TID = 12) did not affect the result of the query as TID = 11 < 12. Hence TID = 12 is invisible to transaction T1.
 
-Let's take another example:
+This ensures that a transaction is able to see a consistent snapshot.
+
+But there is another problem that we can run into. Let's take an example to see that:
 
 ```sql
 
-  Assume that TID=10 is already running but not yet committed
-  (TID=10): UPDATE users SET name="David" WHERE id=3
+  TID=10 is already running but not yet committed
+  (TID=10): UPDATE users SET name="NewBob" WHERE id=2
 
   T1 (TID=11): SELECT * FROM users WHERE id IN (1, 2, 3)
 
@@ -169,20 +171,36 @@ Let's take another example:
     id=2, name="Bob",     written by TID=8  ← TID 8 <= 11, visible ✓
     id=3, name="Charlie", written by TID=8  ← TID 8 <= 11, visible ✓
 
-  T1 continues scanning and :
-    id=3 has two versions:
-      TID=12: 12 > 11 → INVISIBLE
-      TID=8:  8 <= 11 → VISIBLE, return "Charlie"
+  TID=10 commits
+      → TID 10 <= 11 ✓ → VISIBLE
 
-  Result: Alice, Bob, Charlie ✓ (consistent, unaffected by T2) 
+  T1 continues scanning and :
+    id=2 has two versions:
+      TID=12: 10 <= 11 → VISIBLE --> greater version accepted
+      TID=8:  8 <= 11 → VISIBLE
+
+  Result: Alice, NewBob, Charlie ✓ (inconsistent, affected by TID=10) 
 ```
 
-The above example doesn't cover cases where a transaction is already active before the read started. T1 has transaction ID = 11 but let's say transaction ID = 7 is still active. If TID = 7 is committed during the time T1 is active, it could impact the result of T1.
-Hence, apart from checking transaction ID version, we should also check for active transactions. If a transaction is active, we should not read that key-value pair.
+As can be seen in the above example, even though the transaction TID=10 started before TID=11, it impacted the result of TID=11 because TID=10 was committed while TID=11 was running.
 
-A version is only visible if the transaction ID of the key-value pair we are interested in reading is:
-1. Less than or equal to the transaction ID of the current version to be read.
-2. Not an active transaction. 
+This brings us to another rule that 
+
+**Active needs to be tracked relative to current transaction, why?**
+Note that each snapshot needs to maintain their own list of active transactions. The active transactions list keeps on changing.
+
+```
+  Time 1: Snapshot A taken → active = [51, 52]
+  Time 2: Txn 51 commits → active list becomes [52]
+  Time 3: Snapshot B taken → active = [52]
+```
+
+As can be seen in the above example, Snapshot has transaction 51 as active, hence commits from transaction 51 will not be visible to snapshot A.
+On the other hand for snapshot B, transaction 51 is not active as it has already committed. Hence commits from transaction 51 will be visible to snapshot B.
+
+During reads, a version or transaction id of a key-value pair is only visible if the transaction id of the the key-value pair is:
+1. Less than or equal to the current transaction id.
+2. Not part of the active transactions list of the current transaction snapshot. 
 
 ## Implementing MVCC
 Let's tie this up to how we can implement MVCC.
@@ -196,10 +214,10 @@ Given that SSTables already are append-only in nature, we don't require maintain
 The above approach doesn't work with memtable as it stores a key-value pair only once. Since one key can have only one associated value in a memtable, we would have to store the version in the memtable key itself.
 
 In order to generalise it, we can keep version as part of key for both memtable and SSTable.
-
 For both table writes and secondary indexes writes we need to have the version as part of the key.
 
 ### Read Path
+
 
 #### GET Path
 The read order remains the same: we first check for memtable. If not found in memtable, we check from the newest SSTable to the oldest SSTable.
@@ -211,25 +229,96 @@ During regular GET, if a key is found in memtable, we don't need to check the SS
 
 We will first carry out a prefix scan in memtable for the required key and check from the newest version to the oldest. We can also apply binary search in a way such that we only check less than or equal to the read version. The first version that we encounter that is not an active version is the required key-value pair.
 
+Let's take an example:
+
+TID = 11
+
+Active transactions list = [10]
+
+key = "name"
+
+Memtable has:
+
+[ "name", 8  ] --> "gagan"
+[ "name", 9  ] --> "aman"
+[ "name", 10 ] --> "akash"
+[ "name", 12  ] --> "ankit"
+
+1. We carry out a prefix scan for name. We are not interested in transactions which are less than or equal to target. Hence, we can run a lower bound scan to get keys less than or equal to target so that we don't get the key `[name, 12]`.
+2. Then we go through in descending order and see which transaction is not active. In our case, it is transaction 9 and hence "aman" is the required value.
+
 If the required key is not found in Memtable, we would need to search in SSTable.
+
+For both SSTable and Memtable, there is a way to search this in a more efficient way rather than prefix scan. This is similar to "less than or equal to" condition in range queries. We need to solve for this as well.
+
+But this introduces another problem. We have put version as string suffix. This would mean than name:10 < name:100 < name:11.
+
+This is how the data would be stored in data blocks. How can we ensure that during writes we are writing in sorted order to memtable and sstable. If we are able to write in sorted order in memtable, the SSTable order also becomes sorted.
+
+Our memtable is always string as of now. We can potentially make it integer but in our case, we need a mix of string which is the actual key and version which is string as of now.
+
+To solve for that, we need to modify our memtable implementation. Currently it is:
+
+```go
+  type Entry struct {
+    Key   string
+    Value string
+  }
+
+  func (e *Entry) Less(than btree.Item) bool {
+    return e.Key < than.(*Entry).Key
+  }
+```
+
+Now version is also added to the struct. Key is still the most significant sorting criteria. But after key, we should sort on the basis of version.
+
+```go
+  type Entry struct {
+    Key   string
+    Value string
+    Version uint
+  }
+
+  func (e *Entry) Less(than btree.Item) bool {
+    if e.Key == than.(*Entry).Key {
+      return e.Version < than.(*Entry).Version
+    }
+    return e.Key < than.(*Entry).Key
+  }
+```
+
+Key Insight. All of that should not be needed. Binary encoding can solve all of that. key + bigendian(10)
+
+This ensure that the data is put in sorted version order for the same key for both memtable and sstable.
 
 **SSTable Search**
 
-The first version
+Since new version is always created later, a newer version will always be in a newer file.
+We have also ensured that while memtable is written to SSTable, the SSTable writes are sorted by version for the same key. 
 
-**SELECT Path**
+This means that we can apply binary search on a combination of key and version. We could have just searched for the key and then checked all the versions. There can't be 
 
-**SELECT Index Path**
+We can just do lower bound as earlier. We would get multiple keys for the same version. We just need to pick the version which is less than or equal to target.
 
-Once we pull that 
+### SELECT Path
 
-But memtable only has one value.
+SELECT is the more important and interesting path.
 
-What happens to indexes.
+Revisit how SELECT is done as of now. We require going through each file from newest to oldest. We run a prefix scan on table. Prefix scan means that for each file we run lower bound and keep on going till the end of the file till we encounter a different version.
 
-Internal Note: Why active transactions should not be a global variable?
+For each key we need to find the latest version less than or equal to current transaction id.
+
+### SELECT Index Path
+
 
 ### Compaction Path
+Earlier during compaction, we were deleting all of the old values for a key and only keeping the most recent one. Now we can't delete all of the old values. We need to keep some of the versions which are still being read by ongoing transactions. 
+
+How to find that which is the oldest version to keep during compaction?
+
+The oldest version is the minima among the local minima of the active transactions list. Only versions older than this can be deleted.
+
+### UTs and Benchmarking
 
 ### Operational, Storage, Latency Overhead
 
@@ -340,3 +429,13 @@ Readers acquire read locks and Writers acquire write locks.
 The only way to improve performance is to drop locks entirely
 1. So that other reader transactions don't see uncommitted data. But that was solved by the buffered writes solution which we came up with.
 2. Yes, buffered write solves it. But what if the writer also commits and the reader needs to read again? Then reader was acting on two different values through their transaction. Is that a problem? This is the repeatable read problem. MVCC solves the repeatable read problem.
+
+1. Entry struct change + Less() function (small, foundational)
+2. Write path: PUT with version in memtable and SSTable
+3. Snapshot struct + creation in transaction manager
+4. GET path: lower-bound search with visibility check
+5. SELECT path: prefix scan with per-key visibility
+6. Tombstone handling: versioned deletes
+7. Compaction: snapshot-aware version cleanup
+8. The tests should be solid to actually test for committed reads with two transactions happening in parallel.
+9. Benchmarks: 2PL vs MVCC
