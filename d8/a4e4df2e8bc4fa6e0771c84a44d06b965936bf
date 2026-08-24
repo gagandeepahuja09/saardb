@@ -1,0 +1,22 @@
+db/db.go
+  h_67b5b423f5fb35 144-146,148-149,151,178-186,253,258
+db/select.go
+  h_67b5b423f5fb35 23,25,29,129,132,144,151,160,199,209
+db/transaction.go
+  h_67b5b423f5fb35 164,166-167,170,181,183-186,189,195,199,207,209,214,225
+docs/journal/part_mvcc.md
+  h_67b5b423f5fb35 441-444
+memtable/memtable.go
+  h_67b5b423f5fb35 21,35-37,54,58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "d8a4e4df2e8bc4fa6e0771c84a44d06b965936bf",
+  "prompts": {},
+  "humans": {
+    "h_67b5b423f5fb35": {
+      "author": "gagandeepahuja09 <gagandeepahuja09@gmail.com>"
+    }
+  }
+}
