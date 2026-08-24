@@ -20,13 +20,13 @@ func isFullTableScanQuery(selectFromTableInput sqlparser.SelectFromTable) bool {
 	return len(selectFromTableInput.QueryConditions) == 0
 }
 
-func (db *DB) getRowForPrimaryKey(tableName, primaryKeyId string) ([]string, error) {
+func (txn *Transaction) getRowForPrimaryKey(tableName, primaryKeyId string) ([]string, error) {
 	key := fmt.Sprintf("%s:%s", tableName, primaryKeyId)
-	value, err := db.Get(key)
+	value, err := txn.Get(key)
 	if err != nil {
 		return nil, err
 	}
-	rowValues, err := db.deserializeRowValues(tableName, value)
+	rowValues, err := txn.db.deserializeRowValues(tableName, value)
 	if err != nil {
 		return nil, err
 	}
@@ -126,10 +126,10 @@ func (db *DB) runFullTableScanAndFilterConditions(tableName string, selectFromTa
 }
 
 // todo: not solving for RANGE queries within secondary index or primary key right now.
-func (db *DB) getQueryResultFromSecondaryIndexIfApplicable(tableName string, selectFromTableInput sqlparser.SelectFromTable, schema sqlparser.CreateTable) ([][]string, error) {
+func (txn *Transaction) getQueryResultFromSecondaryIndexIfApplicable(tableName string, selectFromTableInput sqlparser.SelectFromTable, schema sqlparser.CreateTable) ([][]string, error) {
 	secondaryIndex, colsCoveredInSecIndex := getSecondaryIndexForQueryIfApplicable(selectFromTableInput, schema.SecondaryIndexes)
 	if secondaryIndex == nil {
-		return db.runFullTableScanAndFilterConditions(tableName, selectFromTableInput)
+		return txn.db.runFullTableScanAndFilterConditions(tableName, selectFromTableInput)
 	}
 	indexCoveredColValues := []string{}
 
@@ -141,14 +141,14 @@ func (db *DB) getQueryResultFromSecondaryIndexIfApplicable(tableName string, sel
 		}
 	}
 	prefixKey := getSecondaryIndexKeyOrPrefix(tableName, secondaryIndex.IndexName, indexCoveredColValues, "")
-	primaryKeyIds, err := db.secondaryIndexPrefixScan(prefixKey)
+	primaryKeyIds, err := txn.db.secondaryIndexPrefixScan(prefixKey)
 	if err != nil {
 		return nil, err
 	}
 	// Run GET query for each primary key id separately and combine the result of each.
 	queryResult := [][]string{}
 	for _, pkId := range primaryKeyIds {
-		rowValues, err := db.getRowForPrimaryKey(tableName, pkId)
+		rowValues, err := txn.getRowForPrimaryKey(tableName, pkId)
 		if err != nil {
 			return nil, err
 		}
@@ -157,7 +157,7 @@ func (db *DB) getQueryResultFromSecondaryIndexIfApplicable(tableName string, sel
 	if allColumnsCoveredBySecondaryIndex(secondaryIndex, colsCoveredInSecIndex) {
 		return queryResult, nil
 	}
-	return db.filterQueryConditions(tableName, selectFromTableInput.QueryConditions,
+	return txn.db.filterQueryConditions(tableName, selectFromTableInput.QueryConditions,
 		colsCoveredInSecIndex, queryResult)
 }
 
@@ -196,7 +196,7 @@ func (txn *Transaction) selectFromTable(selectFromTableInput sqlparser.SelectFro
 	}
 	// todo: not solving for returning limited columns right now
 	if isPointedPrimaryKeyQuery(selectFromTableInput, pkColumnName) {
-		rowValues, err := db.getRowForPrimaryKey(tableName, selectFromTableInput.QueryConditions[0].Value)
+		rowValues, err := txn.getRowForPrimaryKey(tableName, selectFromTableInput.QueryConditions[0].Value)
 		if err != nil {
 			return nil, err
 		}
@@ -206,7 +206,7 @@ func (txn *Transaction) selectFromTable(selectFromTableInput sqlparser.SelectFro
 		return db.fullTableScan(tableName)
 	}
 
-	return db.getQueryResultFromSecondaryIndexIfApplicable(tableName, selectFromTableInput, schema)
+	return txn.getQueryResultFromSecondaryIndexIfApplicable(tableName, selectFromTableInput, schema)
 }
 
 // value: [value1][size_of_value2][value2][value3]

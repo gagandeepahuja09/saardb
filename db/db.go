@@ -121,10 +121,6 @@ func (db *DB) Close() {
 	// todo: close all sstable files
 }
 
-func (txn *Transaction) Get(key string) (value string, err error) {
-
-}
-
 func (db *DB) Get(key string) (value string, err error) {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
@@ -145,19 +141,14 @@ func (db *DB) createSsTableAndClearWalAndMemTable() error {
 }
 
 func (db *DB) Put(key, value string) error {
-	db.mu.Lock()
-	defer db.mu.Unlock()
-	if err := db.writeToWal(key, value); err != nil {
-		return errors.New("Something went wrong")
+	txn, err := db.Begin()
+	if err != nil {
+		return err
 	}
-	db.memTable.Put(key, value)
-
-	if db.memTable.ShouldFlush() {
-		if err := db.createSsTableAndClearWalAndMemTable(); err != nil {
-			return err
-		}
+	if err = txn.Put(key, value); err != nil {
+		return err
 	}
-	return nil
+	return txn.Commit()
 }
 
 func (db *DB) flushMemtableToSsTable() error {
@@ -182,6 +173,15 @@ func appendLengthPrefixedString(buf []byte, value string) []byte {
 	buf = binary.BigEndian.AppendUint32(buf, uint32(len(value)))
 	buf = append(buf, []byte(value)...)
 	return buf
+}
+
+func readUint64(buf []byte, offset *int) (uint64, error) {
+	if len(buf)-*offset < 8 {
+		return 0, errors.New("malformed WAL command: missing uint64")
+	}
+	value := binary.BigEndian.Uint64(buf[*offset : *offset+8])
+	*offset += 8
+	return value, nil
 }
 
 func readUint32(buf []byte, offset *int) (uint32, error) {
@@ -249,19 +249,13 @@ func (db *DB) buildMemtableFromWal() (*memtable.Memtable, error) {
 			return nil, err
 		}
 		switch cmd {
-		case CmdPut:
-			key, value, err := deserialisePutCommand(payload, &offset)
-			if err != nil {
-				return nil, err
-			}
-			memTable.Put(key, value)
 		case CmdTransaction:
-			putCmds, err := deserialiseTransactionCommand(payload[offset:])
+			txnId, putCmds, err := deserialiseTransactionCommand(payload[offset:])
 			if err != nil {
 				return nil, err
 			}
 			for _, cmd := range putCmds {
-				memTable.Put(cmd.key, cmd.value)
+				memTable.Put(cmd.key, cmd.value, txnId)
 			}
 		default:
 			return nil, fmt.Errorf("unknown WAL command: %s", cmd)

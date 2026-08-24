@@ -439,3 +439,6 @@ The only way to improve performance is to drop locks entirely
 7. Compaction: snapshot-aware version cleanup
 8. The tests should be solid to actually test for committed reads with two transactions happening in parallel.
 9. Benchmarks: 2PL vs MVCC
+
+
+PostgreSQL uses 32-bit transaction IDs and that IS a real problem. At high TPS, 32-bit wraps around in weeks. This is the infamous XID wraparound problem — PostgreSQL must run VACUUM to reclaim old XIDs, and if VACUUM falls behind, the database shuts down to prevent corruption. It's one of PostgreSQL's biggest operational headaches.

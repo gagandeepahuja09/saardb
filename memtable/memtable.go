@@ -18,6 +18,7 @@ type Memtable struct {
 type Entry struct {
 	Key   string
 	Value string
+	TxnId uint64
 }
 
 func (e *Entry) Less(than btree.Item) bool {
@@ -31,6 +32,9 @@ func NewMemtable() Memtable {
 }
 
 func (m *Memtable) Get(key string) (string, bool) {
+	// todo: we would have to rely on prefix scan now
+	// return the latest version
+	// m.PrefixScan()
 	item := m.tree.Get(&Entry{Key: key})
 	if item == nil {
 		return "", false
@@ -47,10 +51,11 @@ func (m *Memtable) Iterate(fn func(key, value string)) {
 	})
 }
 
-func (m *Memtable) Put(key, value string) {
+func (m *Memtable) Put(key, value string, txnId uint64) {
 	entry := Entry{
 		Key:   key,
 		Value: value,
+		TxnId: txnId,
 	}
 	if old := m.tree.ReplaceOrInsert(&entry); old != nil {
 		m.size += (len(value))
