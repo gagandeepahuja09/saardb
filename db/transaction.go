@@ -164,7 +164,6 @@ func (txn *Transaction) Rollback() {
 // [length_of_command][command="TRANSACTION"][64_bit_transaction_id][number_of_writes]
 // [key_length_for_1st][key_for_1st][value_length_for_1st][value_for_1st]...
 func serialiseTransactionCommitPayload(writeMap map[string]string, txnId uint64) []byte {
-	// todo: add txnId in WAL
 	buf := []byte{}
 	buf = appendLengthPrefixedString(buf, CmdTransaction)
 	buf = binary.BigEndian.AppendUint64(buf, txnId)

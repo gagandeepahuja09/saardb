@@ -24,6 +24,7 @@ var testPaymentsTable = sqlparser.CreateTable{
 			DataType:   sqlparser.Bool,
 		},
 	},
+	SecondaryIndexes: []sqlparser.SecondaryIndex{},
 }
 
 var testRefundsTable = sqlparser.CreateTable{
@@ -39,6 +40,7 @@ var testRefundsTable = sqlparser.CreateTable{
 			DataType:   0,
 		},
 	},
+	SecondaryIndexes: []sqlparser.SecondaryIndex{},
 }
 
 func TestAppRestart(t *testing.T) {

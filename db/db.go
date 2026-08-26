@@ -79,6 +79,10 @@ func NewDB(config Config) (*DB, error) {
 	return &db, err
 }
 
+func (db *DB) GetNextTransactionId() uint64 {
+	return db.transactionManager.nextTransactionId
+}
+
 func (db *DB) getTableNameVsSchemaMap() (map[string]sqlparser.CreateTable, error) {
 	tableNameVsSchemaMap := map[string]sqlparser.CreateTable{}
 	tablesString, err := db.Get(CatalogKey)
@@ -152,6 +156,8 @@ func (db *DB) Put(key, value string) error {
 }
 
 func (db *DB) flushMemtableToSsTable() error {
+	// todo: when we start writing txnId to sstable, we also need to persist maxTxnId in manifest file.
+	// and utilise that during application bootup to identify the maxTxnId.
 	ssTableFile, err := db.ssTable.NewFile()
 	if err != nil {
 		return err
@@ -255,9 +261,9 @@ func (db *DB) buildMemtableFromWal() (*memtable.Memtable, uint64, error) {
 			if err != nil {
 				return nil, 0, err
 			}
+			maxTxnId = max(maxTxnId, txnId)
 			for _, cmd := range putCmds {
 				memTable.Put(cmd.key, cmd.value, txnId)
-				maxTxnId = max(maxTxnId, txnId)
 			}
 		default:
 			return nil, 0, fmt.Errorf("unknown WAL command: %s", cmd)
