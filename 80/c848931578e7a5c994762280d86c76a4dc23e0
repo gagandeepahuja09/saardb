@@ -1,0 +1,19 @@
+sstable/manifest.go
+  s_a964fa59702b5c::t_f6fdb6aac0c9ff 15,34-35,43-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "80c848931578e7a5c994762280d86c76a4dc23e0",
+  "prompts": {},
+  "sessions": {
+    "s_a964fa59702b5c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a3760531-c71b-4608-9e5f-7f6e6af58cd2",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "gagandeepahuja09 <gagandeepahuja09@gmail.com>"
+    }
+  }
+}
