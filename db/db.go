@@ -55,7 +55,7 @@ func NewDB(config Config) (*DB, error) {
 	}
 	db.wal = wal
 
-	memTable, err := db.buildMemtableFromWal()
+	memTable, maxTxnId, err := db.buildMemtableFromWal()
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +71,7 @@ func NewDB(config Config) (*DB, error) {
 	}
 
 	db.transactionManager = transactionManager{
-		nextTransactionId:     1,
+		nextTransactionId:     maxTxnId + 1,
 		mu:                    sync.Mutex{},
 		keyVsLocksAcquiredMap: map[string]*LocksAcquired{},
 	}
@@ -229,36 +229,38 @@ func deserialisePutCommand(buf []byte, offset *int) (key, value string, err erro
 	return key, value, nil
 }
 
-func (db *DB) buildMemtableFromWal() (*memtable.Memtable, error) {
+func (db *DB) buildMemtableFromWal() (*memtable.Memtable, uint64, error) {
 	memTable := memtable.NewMemtable()
+	var maxTxnId uint64 = 0
 	for {
 		payload, err := db.wal.ReadEntry()
 		if err == io.EOF {
-			return &memTable, nil
+			return &memTable, maxTxnId, nil
 		}
 		// for now, I will abort even in case of partial write
 		// todo: in case of partial write we should just truncate that log.
 		// we can also do that as part of listening to signal SIGTERM and SIGKILL?
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 
 		offset := 0
 		cmd, err := readLengthPrefixedString(payload, &offset)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		switch cmd {
 		case CmdTransaction:
 			txnId, putCmds, err := deserialiseTransactionCommand(payload[offset:])
 			if err != nil {
-				return nil, err
+				return nil, 0, err
 			}
 			for _, cmd := range putCmds {
 				memTable.Put(cmd.key, cmd.value, txnId)
+				maxTxnId = max(maxTxnId, txnId)
 			}
 		default:
-			return nil, fmt.Errorf("unknown WAL command: %s", cmd)
+			return nil, 0, fmt.Errorf("unknown WAL command: %s", cmd)
 		}
 	}
 }

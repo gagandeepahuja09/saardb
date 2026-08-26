@@ -95,14 +95,15 @@ func TestSerialiseTransactionCommitPayloadRoundTrip(t *testing.T) {
 	payload := serialiseTransactionCommitPayload(map[string]string{
 		"txn key with spaces": "txn value with spaces",
 		"txn key newline":     "txn value\nwith newline",
-	})
+	}, 4)
 
 	offset := 0
 	cmd, err := readLengthPrefixedString(payload, &offset)
 	require.NoError(t, err)
 	assert.Equal(t, CmdTransaction, cmd)
 
-	putCmds, err := deserialiseTransactionCommand(payload[offset:])
+	txnId, putCmds, err := deserialiseTransactionCommand(payload[offset:])
+	assert.Equal(t, uint64(4), txnId)
 	require.NoError(t, err)
 
 	actual := map[string]string{}
@@ -116,8 +117,13 @@ func TestSerialiseTransactionCommitPayloadRoundTrip(t *testing.T) {
 	}, actual)
 }
 
-func TestDeserialiseTransactionCommandRejectsMalformedPayload(t *testing.T) {
-	_, err := deserialiseTransactionCommand([]byte{0, 0, 0})
+func TestDeserialiseTransactionCommandRejectsMalformedPayloadMissingTxnId(t *testing.T) {
+	_, _, err := deserialiseTransactionCommand([]byte{0, 0, 0, 0, 0, 0, 0})
+	assert.EqualError(t, err, "malformed WAL command: missing uint64")
+}
+
+func TestDeserialiseTransactionCommandRejectsMalformedPayloadMissingNumWrites(t *testing.T) {
+	_, _, err := deserialiseTransactionCommand([]byte{0, 0, 0, 0, 0, 0, 0, 1})
 	assert.EqualError(t, err, "malformed WAL command: missing uint32")
 }
 
