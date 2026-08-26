@@ -1,0 +1,20 @@
+db/db.go
+  h_67b5b423f5fb35 58,74,232,234,238,244,250,256,260,263
+db/wal_command_test.go
+  h_67b5b423f5fb35 98,105-106,120-126
+memtable/memtable.go
+  h_67b5b423f5fb35 4,26-28,39-50,68-69
+memtable/memtable_test.go
+  h_67b5b423f5fb35 1-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "74fea876b40665744befe1e8238378b3c9fb9222",
+  "prompts": {},
+  "humans": {
+    "h_67b5b423f5fb35": {
+      "author": "gagandeepahuja09 <gagandeepahuja09@gmail.com>"
+    }
+  }
+}
