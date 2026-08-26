@@ -1,0 +1,14 @@
+memtable/memtable.go
+  h_67b5b423f5fb35 67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "b1071f997cbda43892203669c6bf8b33b5b28937",
+  "prompts": {},
+  "humans": {
+    "h_67b5b423f5fb35": {
+      "author": "gagandeepahuja09 <gagandeepahuja09@gmail.com>"
+    }
+  }
+}
