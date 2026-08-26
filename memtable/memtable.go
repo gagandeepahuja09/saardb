@@ -1,7 +1,6 @@
 package memtable
 
 import (
-	"math"
 	"strings"
 
 	"github.com/google/btree"
@@ -24,7 +23,7 @@ type Entry struct {
 
 func (e *Entry) Less(than btree.Item) bool {
 	if e.Key == than.(*Entry).Key {
-		return e.TxnId > than.(*Entry).TxnId
+		return e.TxnId < than.(*Entry).TxnId
 	}
 	return e.Key < than.(*Entry).Key
 }
@@ -38,14 +37,14 @@ func NewMemtable() Memtable {
 func (m *Memtable) Get(key string) (string, bool) {
 	value := ""
 	found := false
-	m.tree.AscendGreaterOrEqual(&Entry{Key: key, TxnId: math.MaxUint64}, func(item btree.Item) bool {
+	m.tree.AscendGreaterOrEqual(&Entry{Key: key}, func(item btree.Item) bool {
 		e := item.(*Entry)
 		if e.Key != key {
 			return false
 		}
 		value = e.Value
 		found = true
-		return false
+		return true
 	})
 	return value, found
 }
