@@ -55,7 +55,7 @@ func NewDB(config Config) (*DB, error) {
 	}
 	db.wal = wal
 
-	memTable, err := db.buildMemtableFromWal()
+	memTable, maxTxnId, err := db.buildMemtableFromWal()
 	if err != nil {
 		return nil, err
 	}
@@ -71,12 +71,16 @@ func NewDB(config Config) (*DB, error) {
 	}
 
 	db.transactionManager = transactionManager{
-		nextTransactionId:     1,
+		nextTransactionId:     maxTxnId + 1,
 		mu:                    sync.Mutex{},
 		keyVsLocksAcquiredMap: map[string]*LocksAcquired{},
 	}
 
 	return &db, err
+}
+
+func (db *DB) GetNextTransactionId() uint64 {
+	return db.transactionManager.nextTransactionId
 }
 
 func (db *DB) getTableNameVsSchemaMap() (map[string]sqlparser.CreateTable, error) {
@@ -141,22 +145,19 @@ func (db *DB) createSsTableAndClearWalAndMemTable() error {
 }
 
 func (db *DB) Put(key, value string) error {
-	db.mu.Lock()
-	defer db.mu.Unlock()
-	if err := db.writeToWal(key, value); err != nil {
-		return errors.New("Something went wrong")
+	txn, err := db.Begin()
+	if err != nil {
+		return err
 	}
-	db.memTable.Put(key, value)
-
-	if db.memTable.ShouldFlush() {
-		if err := db.createSsTableAndClearWalAndMemTable(); err != nil {
-			return err
-		}
+	if err = txn.Put(key, value); err != nil {
+		return err
 	}
-	return nil
+	return txn.Commit()
 }
 
 func (db *DB) flushMemtableToSsTable() error {
+	// todo: when we start writing txnId to sstable, we also need to persist maxTxnId in manifest file.
+	// and utilise that during application bootup to identify the maxTxnId.
 	ssTableFile, err := db.ssTable.NewFile()
 	if err != nil {
 		return err
@@ -178,6 +179,15 @@ func appendLengthPrefixedString(buf []byte, value string) []byte {
 	buf = binary.BigEndian.AppendUint32(buf, uint32(len(value)))
 	buf = append(buf, []byte(value)...)
 	return buf
+}
+
+func readUint64(buf []byte, offset *int) (uint64, error) {
+	if len(buf)-*offset < 8 {
+		return 0, errors.New("malformed WAL command: missing uint64")
+	}
+	value := binary.BigEndian.Uint64(buf[*offset : *offset+8])
+	*offset += 8
+	return value, nil
 }
 
 func readUint32(buf []byte, offset *int) (uint32, error) {
@@ -225,42 +235,38 @@ func deserialisePutCommand(buf []byte, offset *int) (key, value string, err erro
 	return key, value, nil
 }
 
-func (db *DB) buildMemtableFromWal() (*memtable.Memtable, error) {
+func (db *DB) buildMemtableFromWal() (*memtable.Memtable, uint64, error) {
 	memTable := memtable.NewMemtable()
+	var maxTxnId uint64 = 0
 	for {
 		payload, err := db.wal.ReadEntry()
 		if err == io.EOF {
-			return &memTable, nil
+			return &memTable, maxTxnId, nil
 		}
 		// for now, I will abort even in case of partial write
 		// todo: in case of partial write we should just truncate that log.
 		// we can also do that as part of listening to signal SIGTERM and SIGKILL?
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 
 		offset := 0
 		cmd, err := readLengthPrefixedString(payload, &offset)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		switch cmd {
-		case CmdPut:
-			key, value, err := deserialisePutCommand(payload, &offset)
-			if err != nil {
-				return nil, err
-			}
-			memTable.Put(key, value)
 		case CmdTransaction:
-			putCmds, err := deserialiseTransactionCommand(payload[offset:])
+			txnId, putCmds, err := deserialiseTransactionCommand(payload[offset:])
 			if err != nil {
-				return nil, err
+				return nil, 0, err
 			}
+			maxTxnId = max(maxTxnId, txnId)
 			for _, cmd := range putCmds {
-				memTable.Put(cmd.key, cmd.value)
+				memTable.Put(cmd.key, cmd.value, txnId)
 			}
 		default:
-			return nil, fmt.Errorf("unknown WAL command: %s", cmd)
+			return nil, 0, fmt.Errorf("unknown WAL command: %s", cmd)
 		}
 	}
 }

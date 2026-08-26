@@ -161,11 +161,12 @@ func (txn *Transaction) Rollback() {
 }
 
 // payload structure:
-// [length_of_command][command="TRANSACTION"][number_of_writes]
+// [length_of_command][command="TRANSACTION"][64_bit_transaction_id][number_of_writes]
 // [key_length_for_1st][key_for_1st][value_length_for_1st][value_for_1st]...
-func serialiseTransactionCommitPayload(writeMap map[string]string) []byte {
+func serialiseTransactionCommitPayload(writeMap map[string]string, txnId uint64) []byte {
 	buf := []byte{}
 	buf = appendLengthPrefixedString(buf, CmdTransaction)
+	buf = binary.BigEndian.AppendUint64(buf, txnId)
 	buf = binary.BigEndian.AppendUint32(buf, uint32(len(writeMap)))
 
 	for key, value := range writeMap {
@@ -176,21 +177,25 @@ func serialiseTransactionCommitPayload(writeMap map[string]string) []byte {
 }
 
 // [number_of_writes][key_length_for_1st][key_for_1st][value_length_for_1st][value_for_1st]...
-func deserialiseTransactionCommand(buf []byte) ([]walPutCommand, error) {
+func deserialiseTransactionCommand(buf []byte) (uint64, []walPutCommand, error) {
 	offset := 0
+	txnId, err := readUint64(buf, &offset)
+	if err != nil {
+		return 0, nil, err
+	}
 	numWrites, err := readUint32(buf, &offset)
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	putCmds := []walPutCommand{}
 	for j := 0; j < int(numWrites); j++ {
 		key, err := readLengthPrefixedString(buf, &offset)
 		if err != nil {
-			return nil, err
+			return 0, nil, err
 		}
 		value, err := readLengthPrefixedString(buf, &offset)
 		if err != nil {
-			return nil, err
+			return 0, nil, err
 		}
 		putCmds = append(putCmds, walPutCommand{
 			key:   key,
@@ -198,14 +203,14 @@ func deserialiseTransactionCommand(buf []byte) ([]walPutCommand, error) {
 		})
 	}
 	if offset != len(buf) {
-		return nil, errors.New("malformed WAL command: unexpected trailing bytes")
+		return 0, nil, errors.New("malformed WAL command: unexpected trailing bytes")
 	}
-	return putCmds, nil
+	return txnId, putCmds, nil
 }
 
 // necessary to do in a single WAL write for atomicity
 func (txn *Transaction) writeSingleWalEntryForCommit() error {
-	buf := serialiseTransactionCommitPayload(txn.bufferedWriteMap)
+	buf := serialiseTransactionCommitPayload(txn.bufferedWriteMap, txn.id)
 	return txn.db.wal.WriteEntry(buf)
 }
 
@@ -216,7 +221,7 @@ func (txn *Transaction) Commit() error {
 
 	// put in memtable done separately instead of db.Put as that would lead to separate writes in WAL
 	for key, value := range txn.bufferedWriteMap {
-		txn.db.memTable.Put(key, value)
+		txn.db.memTable.Put(key, value, txn.id)
 	}
 
 	if txn.db.memTable.ShouldFlush() {

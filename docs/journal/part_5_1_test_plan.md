@@ -309,3 +309,5 @@ ok      github.com/golang-db/db 55.102s coverage: 70.9% of statements
         github.com/golang-db/memtable           coverage: 0.0% of statements
         github.com/golang-db/sstable            coverage: 0.0% of statements
 ok      github.com/golang-db/wal        0.987s  coverage: 77.6% of statements
+
+/usr/local/go/bin/go run main.go

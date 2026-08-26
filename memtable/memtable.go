@@ -18,9 +18,13 @@ type Memtable struct {
 type Entry struct {
 	Key   string
 	Value string
+	TxnId uint64
 }
 
 func (e *Entry) Less(than btree.Item) bool {
+	if e.Key == than.(*Entry).Key {
+		return e.TxnId < than.(*Entry).TxnId
+	}
 	return e.Key < than.(*Entry).Key
 }
 
@@ -31,11 +35,18 @@ func NewMemtable() Memtable {
 }
 
 func (m *Memtable) Get(key string) (string, bool) {
-	item := m.tree.Get(&Entry{Key: key})
-	if item == nil {
-		return "", false
-	}
-	return item.(*Entry).Value, true
+	value := ""
+	found := false
+	m.tree.AscendGreaterOrEqual(&Entry{Key: key}, func(item btree.Item) bool {
+		e := item.(*Entry)
+		if e.Key != key {
+			return false
+		}
+		value = e.Value
+		found = true
+		return true
+	})
+	return value, found
 }
 
 // Iterate loops through each of the key, value pair in the memTable
@@ -47,11 +58,13 @@ func (m *Memtable) Iterate(fn func(key, value string)) {
 	})
 }
 
-func (m *Memtable) Put(key, value string) {
+func (m *Memtable) Put(key, value string, txnId uint64) {
 	entry := Entry{
 		Key:   key,
 		Value: value,
+		TxnId: txnId,
 	}
+	// todo: revisit memtable flush condition logic after some research
 	if old := m.tree.ReplaceOrInsert(&entry); old != nil {
 		m.size += (len(value))
 		m.size -= (len(old.(*Entry).Value))
