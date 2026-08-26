@@ -64,8 +64,7 @@ func (m *Memtable) Put(key, value string, txnId uint64) {
 		Value: value,
 		TxnId: txnId,
 	}
-	// todo: this logic needs to change
-	// INSERT query would be replacement now
+	// todo: revisit memtable flush condition logic after some research
 	if old := m.tree.ReplaceOrInsert(&entry); old != nil {
 		m.size += (len(value))
 		m.size -= (len(old.(*Entry).Value))
