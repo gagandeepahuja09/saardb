@@ -96,7 +96,7 @@ func (st *SsTable) NewFile() (*os.File, error) {
 // It calls the iteratorFunc function to get a stream of key, value pairs from a source.
 // example: 1. MemTable OR 2. firstLevelFiles which need to be merged and compacted.
 // It also updates the internal structs for firstLevelFiles, indexBlocks, manifest files and indexOffsets
-func (st *SsTable) Write(file *os.File, iteratorFunc func(fn func(key, value string))) error {
+func (st *SsTable) Write(file *os.File, iteratorFunc func(fn func(key, value string, txnId uint64))) error {
 	indexOffset, indexBlock, err := st.writeToFile(file, iteratorFunc)
 	if err != nil {
 		return err
@@ -121,7 +121,7 @@ func (st *SsTable) Write(file *os.File, iteratorFunc func(fn func(key, value str
 // It calls the iteratorFunc function to get a stream of key, value pairs from a source.
 // example: 1. MemTable OR 2. firstLevelFiles which need to be merged and compacted.
 // returns the index block and indexOffset after writing to file.
-func (st *SsTable) writeToFile(file *os.File, iteratorFunc func(fn func(key, value string))) (int, []indexBlockEntry, error) {
+func (st *SsTable) writeToFile(file *os.File, iteratorFunc func(fn func(key, value string, txnId uint64))) (int, []indexBlockEntry, error) {
 	indexOffset, indexBlock, err := st.writeDataBlocks(file, iteratorFunc)
 	if err != nil {
 		return 0, nil, err
@@ -149,7 +149,7 @@ func (st *SsTable) writeFooter(file *os.File, indexBlockStartOffset int) error {
 // It also returns:
 // 1. Offset from which the index block should be written. This is also important to be tracked in the file footer.
 // 2. A struct slice for the index block entries which is next written to the ssTable file.
-func (st *SsTable) writeDataBlocks(file *os.File, iteratorFunc func(fn func(key, value string))) (int,
+func (st *SsTable) writeDataBlocks(file *os.File, iteratorFunc func(fn func(key, value string, txnId uint64))) (int,
 	[]indexBlockEntry, error) {
 	blockLength := 0
 	blockStartOffset := 0
@@ -160,14 +160,14 @@ func (st *SsTable) writeDataBlocks(file *os.File, iteratorFunc func(fn func(key,
 
 	var err error
 
-	iteratorFunc(func(key, value string) {
+	iteratorFunc(func(key, value string, txnId uint64) {
 		if blockFirstKey == "" {
 			blockFirstKey = key
 		}
 		// write byte array
-		// todo: checksum to be added later
-		// [length_of_key][key][length_of_value][value]
+		// [64_bit_txnId][length_of_key][key][length_of_value][value]
 		ssTableEntryBuf := []byte{}
+		ssTableEntryBuf = binary.BigEndian.AppendUint64(ssTableEntryBuf, txnId)
 		ssTableEntryBuf = binary.BigEndian.AppendUint32(ssTableEntryBuf, uint32(len(key)))
 		ssTableEntryBuf = append(ssTableEntryBuf, []byte(key)...)
 		ssTableEntryBuf = binary.BigEndian.AppendUint32(ssTableEntryBuf, uint32(len(value)))
@@ -407,6 +407,12 @@ func (st *SsTable) sequentiallyScanTableAndUpdateMap(ssTableFile *os.File, table
 		return nil, err
 	}
 	for i := 0; i < len(ssTableDataBlockBuf); {
+		// todo: need to read txnId as well
+		if i+8 > len(ssTableDataBlockBuf) {
+			return nil, errors.New("unexpected error while reading txnId")
+		}
+		binary.BigEndian.Uint64(ssTableDataBlockBuf[i : i+8])
+		i += 8
 		key, err := extractValueFromSsTable(ssTableDataBlockBuf, i)
 		if err != nil {
 			return nil, err

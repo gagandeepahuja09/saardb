@@ -50,10 +50,10 @@ func (m *Memtable) Get(key string) (string, bool) {
 }
 
 // Iterate loops through each of the key, value pair in the memTable
-func (m *Memtable) Iterate(fn func(key, value string)) {
+func (m *Memtable) Iterate(fn func(key, value string, txnId uint64)) {
 	m.tree.Ascend(func(item btree.Item) bool {
 		e := item.(*Entry)
-		fn(e.Key, e.Value)
+		fn(e.Key, e.Value, e.TxnId)
 		return true
 	})
 }
