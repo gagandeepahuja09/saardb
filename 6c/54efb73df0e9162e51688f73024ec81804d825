@@ -1,0 +1,20 @@
+docs/pr_descriptions/23.md
+  h_67b5b423f5fb35 1-11
+memtable/memtable.go
+  h_67b5b423f5fb35 53,56
+sstable/compaction.go
+  h_67b5b423f5fb35 6-7,12-17,26-33,44-48,59-66,69,84,90,95,97-99
+sstable/sstable.go
+  h_67b5b423f5fb35 99,124,152,163,168,170,410-415
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "6c54efb73df0e9162e51688f73024ec81804d825",
+  "prompts": {},
+  "humans": {
+    "h_67b5b423f5fb35": {
+      "author": "gagandeepahuja09 <gagandeepahuja09@gmail.com>"
+    }
+  }
+}
