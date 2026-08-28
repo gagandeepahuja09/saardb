@@ -1,0 +1,14 @@
+sstable/sstable.go
+  h_67b5b423f5fb35 413-414,450-455
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "37ee08de7401f092e190d5e00a1dfbc9c1a39212",
+  "prompts": {},
+  "humans": {
+    "h_67b5b423f5fb35": {
+      "author": "gagandeepahuja09 <gagandeepahuja09@gmail.com>"
+    }
+  }
+}
