@@ -407,11 +407,11 @@ func (st *SsTable) sequentiallyScanTableAndUpdateMap(ssTableFile *os.File, table
 		return nil, err
 	}
 	for i := 0; i < len(ssTableDataBlockBuf); {
-		// todo: need to read txnId as well
 		if i+8 > len(ssTableDataBlockBuf) {
 			return nil, errors.New("unexpected error while reading txnId")
 		}
-		binary.BigEndian.Uint64(ssTableDataBlockBuf[i : i+8])
+		// todo: utilise txnId later
+		_ = binary.BigEndian.Uint64(ssTableDataBlockBuf[i : i+8])
 		i += 8
 		key, err := extractValueFromSsTable(ssTableDataBlockBuf, i)
 		if err != nil {
@@ -447,6 +447,12 @@ func (st *SsTable) getValueFromSsTableDataBlock(ssTableFile *os.File, key string
 		return "", err
 	}
 	for i := 0; i < len(ssTableDataBlockBuf); {
+		// todo: utilise txnId in the next PR
+		if i+8 > len(ssTableDataBlockBuf) {
+			return "", errors.New("unexpected error while reading txnId")
+		}
+		_ = binary.BigEndian.Uint64(ssTableDataBlockBuf[i : i+8])
+		i += 8
 		currentKey, err := extractValueFromSsTable(ssTableDataBlockBuf, i)
 		if err != nil {
 			return "", err
