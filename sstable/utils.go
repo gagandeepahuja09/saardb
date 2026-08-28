@@ -4,7 +4,7 @@ import (
 	"sort"
 )
 
-func sortedKeys(mp map[string]string) (keys []string) {
+func sortedKeys(mp map[string]valueTxnId) (keys []string) {
 	for key, _ := range mp {
 		keys = append(keys, key)
 	}

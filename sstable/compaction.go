@@ -9,8 +9,7 @@ import (
 	"os"
 )
 
-type compactedEntry struct {
-	key   string
+type valueTxnId struct {
 	value string
 	txnId uint64
 }
@@ -21,14 +20,13 @@ func (st *SsTable) ShouldRunCompaction() bool {
 	return !st.compacting && len(st.firstLevelFiles) >= 4
 }
 
-// builds a compactedMap formed from all the key value pairs present in the files.
-// we go from the oldest file to the newest one to ensure that the key has the most up-to-date value.
-func (st *SsTable) buildCompactedEntries(files []*os.File) ([]compactedEntry, error) {
+// builds a compactedEntry struct containing (key, value, txnId) formed from all the
+// (key value, txnId) pairs present in the files. We only keep the newest txnId for a key.
+func (st *SsTable) buildCompactedMap(files []*os.File) (map[string]valueTxnId, error) {
 	// todo: as of now, we will only keep the newest version after compaction.
 	// in a subsequent PR, this will be updated to keep the txnId >= oldestActiveTxnId
 	// + newest values of txnId for each key if txnId < oldestActiveTxnId
-	keySeen := map[string]bool{}
-	compactedEntries := []compactedEntry{}
+	compactedMap := map[string]valueTxnId{}
 	for i := len(files) - 1; i >= 0; i-- {
 		file := files[i]
 		indexOffset, err := st.getIndexOffset(file)
@@ -42,7 +40,7 @@ func (st *SsTable) buildCompactedEntries(files []*os.File) ([]compactedEntry, er
 		}
 		for i := 0; i < len(buf); {
 			if i+8 > len(buf) {
-				return nil, errors.New("unexpected error while reading txnId")
+				return nil, errors.New("unexpected error while reading txnId during compaction")
 			}
 			txnId := binary.BigEndian.Uint64(buf[i : i+8])
 			i += 8
@@ -56,17 +54,17 @@ func (st *SsTable) buildCompactedEntries(files []*os.File) ([]compactedEntry, er
 				return nil, err
 			}
 			i += (4 + len(value))
-			if !keySeen[key] {
-				keySeen[key] = true
-				compactedEntries = append(compactedEntries, compactedEntry{
-					key:   key,
+			_, ok := compactedMap[key]
+			if !ok {
+				compactedMap[key] = valueTxnId{
 					value: value,
 					txnId: txnId,
-				})
+				}
+				// fmt.Printf("compactedEntries555: %v\n", compactedEntries)
 			}
 		}
 	}
-	return compactedEntries, nil
+	return compactedMap, nil
 }
 
 func (st *SsTable) RunCompaction() {
@@ -87,16 +85,19 @@ func (st *SsTable) RunCompaction() {
 	copy(filesToCompact, st.firstLevelFiles)
 	st.mutex.RUnlock()
 	slog.Info("COMPACTION_STARTED", "files_to_be_compacted_count", len(filesToCompact))
-	compactedEntries, err := st.buildCompactedEntries(filesToCompact)
+	compactedMap, err := st.buildCompactedMap(filesToCompact)
 	if err != nil {
 		slog.Error("COMPACTED_MAP_BUILD_FAILED", "error", err.Error())
+		return
 	}
+
+	sortedKeys := sortedKeys(compactedMap)
 
 	// 3. create iterator function which calls the callback for each key-value pair in sorted
 	// and compacted map
 	iterator := func(fn func(key, value string, txnId uint64)) {
-		for _, ce := range compactedEntries {
-			fn(ce.key, ce.value, ce.txnId)
+		for _, key := range sortedKeys {
+			fn(key, compactedMap[key].value, compactedMap[key].txnId)
 		}
 	}
 
@@ -161,3 +162,5 @@ func (st *SsTable) atomicSwap(compactedFile *os.File, oldFiles []*os.File, compa
 	st.manifest.FileNames = fileNames
 	st.saveManifest()
 }
+
+// todo: we should have a test to assert that compaction captures all keys and those keys are in sorted order
