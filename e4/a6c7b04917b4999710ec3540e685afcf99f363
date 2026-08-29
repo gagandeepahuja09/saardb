@@ -1,0 +1,26 @@
+db/db.go
+  h_67b5b423f5fb35 8,160-161
+db/select.go
+  h_67b5b423f5fb35 258,263
+docs/journal/part_mvcc.md
+  h_67b5b423f5fb35 444
+docs/journal/part_mvcc_bugfixes.md
+  h_67b5b423f5fb35 1-115
+sstable/compaction.go
+  h_67b5b423f5fb35 17-24,170
+sstable/sstable.go
+  h_67b5b423f5fb35 359,362,403,413,429-430
+sstable_test.go
+  h_67b5b423f5fb35 82-125
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "e4a6c7b04917b4999710ec3540e685afcf99f363",
+  "prompts": {},
+  "humans": {
+    "h_67b5b423f5fb35": {
+      "author": "gagandeepahuja09 <gagandeepahuja09@gmail.com>"
+    }
+  }
+}
