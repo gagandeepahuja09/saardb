@@ -340,10 +340,10 @@ func (st *SsTable) Get(key string) (string, error) {
 		if lowerBoundSliceIndex == -1 {
 			continue
 		}
+		// for the same key, multiple version can be present across multiple data files
+		// hece, we need to search till the end of index offset or if a greater key is found,
+		// whichever happens first.
 		endOffset := st.indexOffsets[i]
-		if lowerBoundSliceIndex < len(ssTableIndex)-1 {
-			endOffset = ssTableIndex[lowerBoundSliceIndex+1].offset
-		}
 		value, err := st.getValueFromSsTableDataBlock(file, key,
 			ssTableIndex[lowerBoundSliceIndex].offset, endOffset)
 		if value == "" && err == nil {
@@ -440,18 +440,21 @@ func (st *SsTable) sequentiallyScanTableAndUpdateMap(ssTableFile *os.File, table
 	return tableMap, nil
 }
 
+// todo: can't rely on a single data block now
 func (st *SsTable) getValueFromSsTableDataBlock(ssTableFile *os.File, key string, dataBlockStartOffset, dataBlockEndOffset int) (string, error) {
 	ssTableDataBlockBuf := make([]byte, dataBlockEndOffset-dataBlockStartOffset)
 	_, err := ssTableFile.ReadAt(ssTableDataBlockBuf, int64(dataBlockStartOffset))
 	if err != nil && err != io.EOF {
 		return "", err
 	}
+	maxTxnIdValue := ""
+	var maxTxnId uint64 = 0
 	for i := 0; i < len(ssTableDataBlockBuf); {
 		// todo: utilise txnId in the next PR
 		if i+8 > len(ssTableDataBlockBuf) {
 			return "", errors.New("unexpected error while reading txnId")
 		}
-		_ = binary.BigEndian.Uint64(ssTableDataBlockBuf[i : i+8])
+		txnId := binary.BigEndian.Uint64(ssTableDataBlockBuf[i : i+8])
 		i += 8
 		currentKey, err := extractValueFromSsTable(ssTableDataBlockBuf, i)
 		if err != nil {
@@ -463,11 +466,14 @@ func (st *SsTable) getValueFromSsTableDataBlock(ssTableFile *os.File, key string
 			return "", err
 		}
 		i += (4 + len(currentValue))
-		if currentKey == key {
-			return currentValue, nil
+		if currentKey == key && txnId > uint64(maxTxnId) {
+			maxTxnId = txnId
+			maxTxnIdValue = currentValue
+		} else if currentKey > key {
+			break
 		}
 	}
-	return "", nil
+	return maxTxnIdValue, nil
 }
 
 func getLowerBound(key string, index []indexBlockEntry) int {

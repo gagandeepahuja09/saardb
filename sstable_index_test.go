@@ -21,6 +21,7 @@ var testDbConfig = db.Config{
 
 func dbDirCleanUp(t *testing.T) {
 	err := os.RemoveAll("temp")
+	os.Remove("wal.log")
 	assert.NoError(t, err)
 }
 

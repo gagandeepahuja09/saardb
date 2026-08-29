@@ -54,13 +54,12 @@ func (st *SsTable) buildCompactedMap(files []*os.File) (map[string]valueTxnId, e
 				return nil, err
 			}
 			i += (4 + len(value))
-			_, ok := compactedMap[key]
-			if !ok {
+			currValueTxnId, ok := compactedMap[key]
+			if !ok || currValueTxnId.txnId < txnId {
 				compactedMap[key] = valueTxnId{
 					value: value,
 					txnId: txnId,
 				}
-				// fmt.Printf("compactedEntries555: %v\n", compactedEntries)
 			}
 		}
 	}
@@ -91,10 +90,12 @@ func (st *SsTable) RunCompaction() {
 		return
 	}
 
+	// 3. get sorted keys. compacted file needs to have all keys in sorted order
+	// and during compaction we lost the order and that needs to be fixed.
 	sortedKeys := sortedKeys(compactedMap)
 
-	// 3. create iterator function which calls the callback for each key-value pair in sorted
-	// and compacted map
+	// 4. create iterator function which calls the callback for each key-value-transactionId combination
+	//  in sorted and compacted map
 	iterator := func(fn func(key, value string, txnId uint64)) {
 		for _, key := range sortedKeys {
 			fn(key, compactedMap[key].value, compactedMap[key].txnId)
@@ -163,4 +164,8 @@ func (st *SsTable) atomicSwap(compactedFile *os.File, oldFiles []*os.File, compa
 	st.saveManifest()
 }
 
-// todo: we should have a test to assert that compaction captures all keys and those keys are in sorted order
+// todo: we should have a test to assert that compaction captures all keys and those keys are in sorted order.
+// UT would have helped in 2 ways:
+// 1. clearly tell what the issue is
+// 2. set the standard even for an agent. Even LLM could have made same mistake especially for something which is entirely
+// new and with no documentation.
