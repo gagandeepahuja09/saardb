@@ -1,0 +1,20 @@
+docs/journal/part_mvcc.md
+  h_67b5b423f5fb35 444-497
+sstable/compaction.go
+  h_67b5b423f5fb35 57-58,93-94,97-98,167-171
+sstable/sstable.go
+  h_67b5b423f5fb35 343-345,443,450-451,457,469-473,476
+sstable_index_test.go
+  h_67b5b423f5fb35 24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "57f131a5a3737556000b9b474b2933ec450aecdf",
+  "prompts": {},
+  "humans": {
+    "h_67b5b423f5fb35": {
+      "author": "gagandeepahuja09 <gagandeepahuja09@gmail.com>"
+    }
+  }
+}
