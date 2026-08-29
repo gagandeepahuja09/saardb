@@ -79,3 +79,47 @@ func TestGetAndPutInBulk(t *testing.T) {
 
 	assertValuesForTestData(t, db)
 }
+
+func buildTestDataForRepeatKeys(dbInstance *db.DB, innerLoopCount int) {
+	for j := 0; j < 12; j++ {
+		for i := 0; i < innerLoopCount; i++ {
+			key := fmt.Sprintf("key_%d", i)
+			value := fmt.Sprintf("value_%d", i+j)
+			dbInstance.Put(key, value)
+		}
+	}
+}
+
+// write the same set of keys with multiple versions (txnId)
+func TestSsTableGetPicksLatestTxnIdWithCompaction(t *testing.T) {
+	defer dbDirCleanUp(t)
+
+	db, err := db.NewDB(testDbConfig)
+	buildTestDataForRepeatKeys(db, 50)
+	assert.NoError(t, err)
+
+	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("key_%d", i)
+		val, err := db.Get(key)
+		expectedValue := fmt.Sprintf("value_%d", i+11)
+		assert.NoError(t, err)
+		assert.Equal(t, expectedValue, val)
+	}
+}
+
+func TestSsTableGetPicksLatestTxnIdWithoutCompaction(t *testing.T) {
+	defer dbDirCleanUp(t)
+
+	db, err := db.NewDB(testDbConfig)
+	buildTestDataForRepeatKeys(db, 15)
+	assert.NoError(t, err)
+
+	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("key_%d", i)
+		val, err := db.Get(key)
+		assert.NoError(t, err)
+		expectedValue := fmt.Sprintf("value_%d", i+11)
+		assert.NoError(t, err)
+		assert.Equal(t, expectedValue, val)
+	}
+}

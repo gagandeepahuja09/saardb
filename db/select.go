@@ -255,12 +255,12 @@ func (db *DB) fullTableScan(tableName string) ([][]string, error) {
 		scanOutput = append(scanOutput, values)
 	}
 
-	for key, value := range ssTableMap {
+	for key, currValueTxnId := range ssTableMap {
 		if _, ok := memTableMap[key]; ok {
 			// memtable would have the most up-to date value. no need to rely on sstable value when key is found in memtable
 			continue
 		}
-		values, err := db.deserializeRowValues(tableName, value)
+		values, err := db.deserializeRowValues(tableName, currValueTxnId.GetValue())
 		if err != nil {
 			return nil, err
 		}

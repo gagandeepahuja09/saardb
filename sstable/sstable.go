@@ -356,10 +356,10 @@ func (st *SsTable) Get(key string) (string, error) {
 
 // given the prefix key, PrefixScan returns the serialised key
 // and value in a map for all keys which match that prefix in the sstable.
-func (st *SsTable) PrefixScan(prefixKey string) (map[string]string, error) {
+func (st *SsTable) PrefixScan(prefixKey string) (map[string]valueTxnId, error) {
 	st.mutex.RLock()
 	defer st.mutex.RUnlock()
-	tableMap := map[string]string{}
+	tableMap := map[string]valueTxnId{}
 	// newest file to oldest file
 	for i := len(st.firstLevelFiles) - 1; i >= 0; i-- {
 		file := st.firstLevelFiles[i]
@@ -400,7 +400,7 @@ func extractValueFromSsTable(ssTableDataBlockBuf []byte, i int) (string, error) 
 }
 
 func (st *SsTable) sequentiallyScanTableAndUpdateMap(ssTableFile *os.File, tableKey string,
-	dataBlockStartOffset, fileEndOffset int, tableMap map[string]string) (map[string]string, error) {
+	dataBlockStartOffset, fileEndOffset int, tableMap map[string]valueTxnId) (map[string]valueTxnId, error) {
 	ssTableDataBlockBuf := make([]byte, fileEndOffset-dataBlockStartOffset)
 	_, err := ssTableFile.ReadAt(ssTableDataBlockBuf, int64(dataBlockStartOffset))
 	if err != nil && err != io.EOF {
@@ -410,8 +410,7 @@ func (st *SsTable) sequentiallyScanTableAndUpdateMap(ssTableFile *os.File, table
 		if i+8 > len(ssTableDataBlockBuf) {
 			return nil, errors.New("unexpected error while reading txnId")
 		}
-		// todo: utilise txnId later
-		_ = binary.BigEndian.Uint64(ssTableDataBlockBuf[i : i+8])
+		txnId := binary.BigEndian.Uint64(ssTableDataBlockBuf[i : i+8])
 		i += 8
 		key, err := extractValueFromSsTable(ssTableDataBlockBuf, i)
 		if err != nil {
@@ -427,8 +426,8 @@ func (st *SsTable) sequentiallyScanTableAndUpdateMap(ssTableFile *os.File, table
 		if strings.HasPrefix(key, tableKey) {
 			// only set the key value pair if the key is not found
 			// this is because we are sequentially going through the newest file first
-			if _, ok := (tableMap[key]); !ok {
-				tableMap[key] = value
+			if currValueTxnId, ok := (tableMap[key]); !ok || currValueTxnId.txnId < txnId {
+				tableMap[key] = valueTxnId{value: value, txnId: txnId}
 			}
 		} else {
 			keyPrefix := key[0:min(len(tableKey), len(key))]

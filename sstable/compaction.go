@@ -14,6 +14,14 @@ type valueTxnId struct {
 	txnId uint64
 }
 
+func (v *valueTxnId) GetValue() string {
+	return v.value
+}
+
+func (v *valueTxnId) GetTxnId() uint64 {
+	return v.txnId
+}
+
 func (st *SsTable) ShouldRunCompaction() bool {
 	st.mutex.RLock()
 	defer st.mutex.RUnlock()
@@ -159,6 +167,7 @@ func (st *SsTable) atomicSwap(compactedFile *os.File, oldFiles []*os.File, compa
 
 	st.firstLevelFiles = swappedFiles
 	st.indexBlocks = swappedIndexBlocks
+	st.indexOffsets = swappedIndexOffsets
 
 	st.manifest.FileNames = fileNames
 	st.saveManifest()
