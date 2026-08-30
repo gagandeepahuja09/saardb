@@ -3,10 +3,12 @@ package main
 import (
 	"fmt"
 	"os"
+	"sort"
 	"testing"
 	"time"
 
 	"github.com/golang-db/db"
+	sqlparser "github.com/golang-db/sql_parser"
 	"github.com/golang-db/sstable"
 	"github.com/stretchr/testify/assert"
 )
@@ -37,6 +39,30 @@ func buildTestData(db *db.DB) {
 		key := fmt.Sprintf("key_%d", i)
 		value := fmt.Sprintf("value_%d", i)
 		db.Put(key, value)
+	}
+}
+
+func buildTestDataForRepeatKeys(dbInstance *db.DB, innerLoopCount int) {
+	for j := 0; j < 12; j++ {
+		for i := 0; i < innerLoopCount; i++ {
+			key := fmt.Sprintf("key_%d", i)
+			value := fmt.Sprintf("value_%d", i+j)
+			dbInstance.Put(key, value)
+		}
+	}
+}
+
+func buildTestDataForRepeatKeysInTable(db *db.DB, t *testing.T, loopCount int) {
+	err := db.CreateTable("CREATE TABLE students (age INT, id STRING, isActive BOOL, PRIMARY KEY (id));")
+	assert.NoError(t, err)
+
+	ageValues := []int{10, 15, 20, 25}
+
+	for j := 0; j < 4; j++ {
+		for i := 0; i < loopCount; i++ {
+			err = db.InsertIntoTable(fmt.Sprintf("INSERT INTO students VALUES (%d, id%d, 1)", ageValues[(i+j)%4], i))
+			assert.NoError(t, err)
+		}
 	}
 }
 
@@ -80,16 +106,6 @@ func TestGetAndPutInBulk(t *testing.T) {
 	assertValuesForTestData(t, db)
 }
 
-func buildTestDataForRepeatKeys(dbInstance *db.DB, innerLoopCount int) {
-	for j := 0; j < 12; j++ {
-		for i := 0; i < innerLoopCount; i++ {
-			key := fmt.Sprintf("key_%d", i)
-			value := fmt.Sprintf("value_%d", i+j)
-			dbInstance.Put(key, value)
-		}
-	}
-}
-
 // write the same set of keys with multiple versions (txnId)
 func TestSsTableGetPicksLatestTxnIdWithCompaction(t *testing.T) {
 	defer dbDirCleanUp(t)
@@ -123,3 +139,71 @@ func TestSsTableGetPicksLatestTxnIdWithoutCompaction(t *testing.T) {
 		assert.Equal(t, expectedValue, val)
 	}
 }
+
+func getExpectedIdsPerAge(loopCount int) map[int][]string {
+	ageValues := []int{10, 15, 20, 25}
+
+	// outer loop will run 4 times, the final value would be as per j = 3
+	expectedIdsPerAge := map[int][]string{}
+	for i := 0; i < loopCount; i++ {
+		// outer loop will run 4 times, the final value would be as per j = 3
+		age := ageValues[(i+3)%4]
+		expectedIdsPerAge[age] = append(expectedIdsPerAge[age], fmt.Sprintf("id%d", i))
+	}
+
+	for age, expectedIds := range expectedIdsPerAge {
+		sort.Strings(expectedIds)
+		expectedIdsPerAge[age] = expectedIds
+	}
+	return expectedIdsPerAge
+}
+
+func assertAgeValuesFromDbSelect(t *testing.T, db *db.DB, expectedIdsPerAge map[int][]string) {
+	ageValues := []int{10, 15, 20, 25}
+
+	for _, age := range ageValues {
+		res, err := db.SelectFromTable(sqlparser.SelectFromTable{
+			TableName:       "students",
+			ColumnsRequired: []string{"*"},
+			QueryConditions: []sqlparser.QueryCondition{{
+				ColumnName: "age",
+				QueryType:  "=",
+				Value:      fmt.Sprintf("%d", age),
+			}},
+		})
+		assert.NoError(t, err)
+
+		actualIds := []string{}
+		for _, row := range res {
+			actualIds = append(actualIds, row[1])
+		}
+		assert.Len(t, actualIds, len(expectedIdsPerAge[age]))
+		sort.Strings(actualIds)
+		assert.Equal(t, expectedIdsPerAge[age], actualIds)
+	}
+}
+
+func TestSsTablePrefixScanPicksLatestTxnIdWithCompaction(t *testing.T) {
+	defer dbDirCleanUp(t)
+
+	db, err := db.NewDB(testDbConfig)
+	buildTestDataForRepeatKeysInTable(db, t, 10)
+	assert.NoError(t, err)
+
+	expectedIdsPerAge := getExpectedIdsPerAge(10)
+	assertAgeValuesFromDbSelect(t, db, expectedIdsPerAge)
+}
+
+func TestSsTablePrefixScanPicksLatestTxnIdWithoutCompaction(t *testing.T) {
+	defer dbDirCleanUp(t)
+
+	db, err := db.NewDB(testDbConfig)
+	buildTestDataForRepeatKeysInTable(db, t, 10)
+	assert.NoError(t, err)
+
+	expectedIdsPerAge := getExpectedIdsPerAge(10)
+	assertAgeValuesFromDbSelect(t, db, expectedIdsPerAge)
+}
+
+// todo: UT for multiple variants of secondary index?
+// todo: UT for application restart

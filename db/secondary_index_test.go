@@ -96,7 +96,7 @@ func TestSecondaryIndexBasedQueries(t *testing.T) {
 			columnName = "c2"
 			valueTemplate = "val2_%d"
 		}
-		queryRes, err := dbInstance2.selectFromTable(sqlparser.SelectFromTable{
+		queryRes, err := dbInstance2.SelectFromTable(sqlparser.SelectFromTable{
 			TableName: "t1",
 			QueryConditions: []sqlparser.QueryCondition{
 				{
@@ -116,7 +116,7 @@ func TestSecondaryIndexBasedQueries(t *testing.T) {
 
 	// part 2: test the result for c3 and c4 combined composite index
 	for i := 0; i < 10; i++ {
-		queryRes, err := dbInstance2.selectFromTable(sqlparser.SelectFromTable{
+		queryRes, err := dbInstance2.SelectFromTable(sqlparser.SelectFromTable{
 			TableName: "t1",
 			QueryConditions: []sqlparser.QueryCondition{
 				{
@@ -141,7 +141,7 @@ func TestSecondaryIndexBasedQueries(t *testing.T) {
 
 	// part 3: test the result for c3 which is a prefix of c3, c4 composite index
 	for i := 0; i < 5; i++ {
-		queryRes, err := dbInstance2.selectFromTable(sqlparser.SelectFromTable{
+		queryRes, err := dbInstance2.SelectFromTable(sqlparser.SelectFromTable{
 			TableName: "t1",
 			QueryConditions: []sqlparser.QueryCondition{
 				{
@@ -159,7 +159,7 @@ func TestSecondaryIndexBasedQueries(t *testing.T) {
 
 	// part 4: test the result for c4: no index exists
 	for i := 0; i < 2; i++ {
-		queryResult, err := dbInstance2.selectFromTable(sqlparser.SelectFromTable{
+		queryResult, err := dbInstance2.SelectFromTable(sqlparser.SelectFromTable{
 			TableName: "t1",
 			QueryConditions: []sqlparser.QueryCondition{
 				{
