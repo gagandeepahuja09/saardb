@@ -1,0 +1,20 @@
+db/insert_select_test.go
+  h_67b5b423f5fb35 25,64
+db/secondary_index_test.go
+  h_67b5b423f5fb35 99,119,144,162
+db/select.go
+  h_67b5b423f5fb35 164,169,179,197,223-225
+sstable_test.go
+  h_67b5b423f5fb35 6,11,45-68,142-209
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "38aa58af30fd9ba46db1f773d15860ae19f10a7c",
+  "prompts": {},
+  "humans": {
+    "h_67b5b423f5fb35": {
+      "author": "gagandeepahuja09 <gagandeepahuja09@gmail.com>"
+    }
+  }
+}
