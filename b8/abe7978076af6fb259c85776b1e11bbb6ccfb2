@@ -1,0 +1,18 @@
+docs/journal/part_mvcc_bugfixes.md
+  h_67b5b423f5fb35 115-165
+sstable/compaction.go
+  h_67b5b423f5fb35 89
+sstable_test.go
+  h_67b5b423f5fb35 208-219
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "b8abe7978076af6fb259c85776b1e11bbb6ccfb2",
+  "prompts": {},
+  "humans": {
+    "h_67b5b423f5fb35": {
+      "author": "gagandeepahuja09 <gagandeepahuja09@gmail.com>"
+    }
+  }
+}
