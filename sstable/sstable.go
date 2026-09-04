@@ -96,7 +96,7 @@ func (st *SsTable) NewFile() (*os.File, error) {
 // It calls the iteratorFunc function to get a stream of key, value pairs from a source.
 // example: 1. MemTable OR 2. firstLevelFiles which need to be merged and compacted.
 // It also updates the internal structs for firstLevelFiles, indexBlocks, manifest files and indexOffsets
-func (st *SsTable) Write(file *os.File, iteratorFunc func(fn func(key, value string))) error {
+func (st *SsTable) Write(file *os.File, iteratorFunc func(fn func(key, value string, txnId uint64))) error {
 	indexOffset, indexBlock, err := st.writeToFile(file, iteratorFunc)
 	if err != nil {
 		return err
@@ -121,7 +121,7 @@ func (st *SsTable) Write(file *os.File, iteratorFunc func(fn func(key, value str
 // It calls the iteratorFunc function to get a stream of key, value pairs from a source.
 // example: 1. MemTable OR 2. firstLevelFiles which need to be merged and compacted.
 // returns the index block and indexOffset after writing to file.
-func (st *SsTable) writeToFile(file *os.File, iteratorFunc func(fn func(key, value string))) (int, []indexBlockEntry, error) {
+func (st *SsTable) writeToFile(file *os.File, iteratorFunc func(fn func(key, value string, txnId uint64))) (int, []indexBlockEntry, error) {
 	indexOffset, indexBlock, err := st.writeDataBlocks(file, iteratorFunc)
 	if err != nil {
 		return 0, nil, err
@@ -149,7 +149,7 @@ func (st *SsTable) writeFooter(file *os.File, indexBlockStartOffset int) error {
 // It also returns:
 // 1. Offset from which the index block should be written. This is also important to be tracked in the file footer.
 // 2. A struct slice for the index block entries which is next written to the ssTable file.
-func (st *SsTable) writeDataBlocks(file *os.File, iteratorFunc func(fn func(key, value string))) (int,
+func (st *SsTable) writeDataBlocks(file *os.File, iteratorFunc func(fn func(key, value string, txnId uint64))) (int,
 	[]indexBlockEntry, error) {
 	blockLength := 0
 	blockStartOffset := 0
@@ -160,14 +160,14 @@ func (st *SsTable) writeDataBlocks(file *os.File, iteratorFunc func(fn func(key,
 
 	var err error
 
-	iteratorFunc(func(key, value string) {
+	iteratorFunc(func(key, value string, txnId uint64) {
 		if blockFirstKey == "" {
 			blockFirstKey = key
 		}
 		// write byte array
-		// todo: checksum to be added later
-		// [length_of_key][key][length_of_value][value]
+		// [64_bit_txnId][length_of_key][key][length_of_value][value]
 		ssTableEntryBuf := []byte{}
+		ssTableEntryBuf = binary.BigEndian.AppendUint64(ssTableEntryBuf, txnId)
 		ssTableEntryBuf = binary.BigEndian.AppendUint32(ssTableEntryBuf, uint32(len(key)))
 		ssTableEntryBuf = append(ssTableEntryBuf, []byte(key)...)
 		ssTableEntryBuf = binary.BigEndian.AppendUint32(ssTableEntryBuf, uint32(len(value)))
@@ -341,9 +341,6 @@ func (st *SsTable) Get(key string) (string, error) {
 			continue
 		}
 		endOffset := st.indexOffsets[i]
-		if lowerBoundSliceIndex < len(ssTableIndex)-1 {
-			endOffset = ssTableIndex[lowerBoundSliceIndex+1].offset
-		}
 		value, err := st.getValueFromSsTableDataBlock(file, key,
 			ssTableIndex[lowerBoundSliceIndex].offset, endOffset)
 		if value == "" && err == nil {
@@ -356,10 +353,10 @@ func (st *SsTable) Get(key string) (string, error) {
 
 // given the prefix key, PrefixScan returns the serialised key
 // and value in a map for all keys which match that prefix in the sstable.
-func (st *SsTable) PrefixScan(prefixKey string) (map[string]string, error) {
+func (st *SsTable) PrefixScan(prefixKey string) (map[string]valueTxnId, error) {
 	st.mutex.RLock()
 	defer st.mutex.RUnlock()
-	tableMap := map[string]string{}
+	tableMap := map[string]valueTxnId{}
 	// newest file to oldest file
 	for i := len(st.firstLevelFiles) - 1; i >= 0; i-- {
 		file := st.firstLevelFiles[i]
@@ -400,13 +397,18 @@ func extractValueFromSsTable(ssTableDataBlockBuf []byte, i int) (string, error) 
 }
 
 func (st *SsTable) sequentiallyScanTableAndUpdateMap(ssTableFile *os.File, tableKey string,
-	dataBlockStartOffset, fileEndOffset int, tableMap map[string]string) (map[string]string, error) {
+	dataBlockStartOffset, fileEndOffset int, tableMap map[string]valueTxnId) (map[string]valueTxnId, error) {
 	ssTableDataBlockBuf := make([]byte, fileEndOffset-dataBlockStartOffset)
 	_, err := ssTableFile.ReadAt(ssTableDataBlockBuf, int64(dataBlockStartOffset))
 	if err != nil && err != io.EOF {
 		return nil, err
 	}
 	for i := 0; i < len(ssTableDataBlockBuf); {
+		if i+8 > len(ssTableDataBlockBuf) {
+			return nil, errors.New("unexpected error while reading txnId")
+		}
+		txnId := binary.BigEndian.Uint64(ssTableDataBlockBuf[i : i+8])
+		i += 8
 		key, err := extractValueFromSsTable(ssTableDataBlockBuf, i)
 		if err != nil {
 			return nil, err
@@ -421,8 +423,8 @@ func (st *SsTable) sequentiallyScanTableAndUpdateMap(ssTableFile *os.File, table
 		if strings.HasPrefix(key, tableKey) {
 			// only set the key value pair if the key is not found
 			// this is because we are sequentially going through the newest file first
-			if _, ok := (tableMap[key]); !ok {
-				tableMap[key] = value
+			if currValueTxnId, ok := (tableMap[key]); !ok || currValueTxnId.txnId < txnId {
+				tableMap[key] = valueTxnId{value: value, txnId: txnId}
 			}
 		} else {
 			keyPrefix := key[0:min(len(tableKey), len(key))]
@@ -435,12 +437,19 @@ func (st *SsTable) sequentiallyScanTableAndUpdateMap(ssTableFile *os.File, table
 }
 
 func (st *SsTable) getValueFromSsTableDataBlock(ssTableFile *os.File, key string, dataBlockStartOffset, dataBlockEndOffset int) (string, error) {
-	ssTableDataBlockBuf := make([]byte, dataBlockEndOffset-dataBlockStartOffset+1)
+	ssTableDataBlockBuf := make([]byte, dataBlockEndOffset-dataBlockStartOffset)
 	_, err := ssTableFile.ReadAt(ssTableDataBlockBuf, int64(dataBlockStartOffset))
 	if err != nil && err != io.EOF {
 		return "", err
 	}
+	maxTxnIdValue := ""
+	var maxTxnId uint64 = 0
 	for i := 0; i < len(ssTableDataBlockBuf); {
+		if i+8 > len(ssTableDataBlockBuf) {
+			return "", errors.New("unexpected error while reading txnId")
+		}
+		txnId := binary.BigEndian.Uint64(ssTableDataBlockBuf[i : i+8])
+		i += 8
 		currentKey, err := extractValueFromSsTable(ssTableDataBlockBuf, i)
 		if err != nil {
 			return "", err
@@ -451,11 +460,14 @@ func (st *SsTable) getValueFromSsTableDataBlock(ssTableFile *os.File, key string
 			return "", err
 		}
 		i += (4 + len(currentValue))
-		if currentKey == key {
-			return currentValue, nil
+		if currentKey == key && txnId > uint64(maxTxnId) {
+			maxTxnId = txnId
+			maxTxnIdValue = currentValue
+		} else if currentKey > key {
+			break
 		}
 	}
-	return "", nil
+	return maxTxnIdValue, nil
 }
 
 func getLowerBound(key string, index []indexBlockEntry) int {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
@@ -156,6 +157,8 @@ func (db *DB) Put(key, value string) error {
 }
 
 func (db *DB) flushMemtableToSsTable() error {
+	slog.Info("FLUSH_MEMTABLE_TO_SSTABLE_STARTED")
+
 	// todo: when we start writing txnId to sstable, we also need to persist maxTxnId in manifest file.
 	// and utilise that during application bootup to identify the maxTxnId.
 	ssTableFile, err := db.ssTable.NewFile()

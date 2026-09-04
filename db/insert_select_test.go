@@ -22,7 +22,7 @@ func TestInsertSelectTestWithPrimaryKey(t *testing.T) {
 	// todo: tests and code handling cases where data is wrongly provided. eg string provided for INT.
 	assert.NoError(t, err)
 
-	res, err := db.selectFromTable(sqlparser.SelectFromTable{
+	res, err := db.SelectFromTable(sqlparser.SelectFromTable{
 		TableName:       "student",
 		ColumnsRequired: []string{"*"},
 		QueryConditions: []sqlparser.QueryCondition{{
@@ -61,7 +61,7 @@ func TestSelectFullTableScan(t *testing.T) {
 	}
 
 	for i, tableName := range tableNames {
-		tableScan, err := db.selectFromTable(sqlparser.SelectFromTable{
+		tableScan, err := db.SelectFromTable(sqlparser.SelectFromTable{
 			TableName:       tableName,
 			ColumnsRequired: []string{"*"},
 		})

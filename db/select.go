@@ -161,12 +161,12 @@ func (txn *Transaction) getQueryResultFromSecondaryIndexIfApplicable(tableName s
 		colsCoveredInSecIndex, queryResult)
 }
 
-func (db *DB) selectFromTable(selectFromTableInput sqlparser.SelectFromTable) ([][]string, error) {
+func (db *DB) SelectFromTable(selectFromTableInput sqlparser.SelectFromTable) ([][]string, error) {
 	txn, err := db.Begin()
 	if err != nil {
 		return nil, err
 	}
-	res, err := txn.selectFromTable(selectFromTableInput)
+	res, err := txn.SelectFromTable(selectFromTableInput)
 	if err != nil {
 		txn.Rollback()
 		return nil, err
@@ -176,7 +176,7 @@ func (db *DB) selectFromTable(selectFromTableInput sqlparser.SelectFromTable) ([
 }
 
 // todo: without index scan, AND queries support to be added.
-func (txn *Transaction) selectFromTable(selectFromTableInput sqlparser.SelectFromTable) ([][]string, error) {
+func (txn *Transaction) SelectFromTable(selectFromTableInput sqlparser.SelectFromTable) ([][]string, error) {
 	db := txn.db
 	tableName := selectFromTableInput.TableName
 	schema, ok := db.tableNameVsSchemaMap[selectFromTableInput.TableName]
@@ -194,6 +194,7 @@ func (txn *Transaction) selectFromTable(selectFromTableInput sqlparser.SelectFro
 	if pkColumnName == "" {
 		return nil, errors.New("primary key column position is incorrect")
 	}
+
 	// todo: not solving for returning limited columns right now
 	if isPointedPrimaryKeyQuery(selectFromTableInput, pkColumnName) {
 		rowValues, err := txn.getRowForPrimaryKey(tableName, selectFromTableInput.QueryConditions[0].Value)
@@ -219,6 +220,9 @@ func (db *DB) deserializeRowValues(tableName, value string) ([]string, error) {
 	for _, col := range schema.ColumnDetails {
 		switch col.DataType {
 		case sqlparser.Int:
+			if i+4 > len(valueBuf) {
+				return nil, errors.New("deserialisation of int value failed for column: " + col.ColumnName)
+			}
 			val := strconv.FormatUint(uint64(binary.BigEndian.Uint32(valueBuf[i:i+4])), 10)
 			rowValues = append(rowValues, val)
 			i += 4
@@ -255,12 +259,12 @@ func (db *DB) fullTableScan(tableName string) ([][]string, error) {
 		scanOutput = append(scanOutput, values)
 	}
 
-	for key, value := range ssTableMap {
+	for key, currValueTxnId := range ssTableMap {
 		if _, ok := memTableMap[key]; ok {
 			// memtable would have the most up-to date value. no need to rely on sstable value when key is found in memtable
 			continue
 		}
-		values, err := db.deserializeRowValues(tableName, value)
+		values, err := db.deserializeRowValues(tableName, currValueTxnId.GetValue())
 		if err != nil {
 			return nil, err
 		}
