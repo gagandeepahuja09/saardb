@@ -205,5 +205,15 @@ func TestSsTablePrefixScanPicksLatestTxnIdWithoutCompaction(t *testing.T) {
 	assertAgeValuesFromDbSelect(t, db, expectedIdsPerAge)
 }
 
-// todo: UT for multiple variants of secondary index?
-// todo: UT for application restart
+func TestSsTablePrefixScanPicksLatestTxnIdWithCompactionAndAfterApplicationRestart(t *testing.T) {
+	defer dbDirCleanUp(t)
+
+	dbForPut, err := db.NewDB(testDbConfig)
+	buildTestDataForRepeatKeysInTable(dbForPut, t, 50)
+	assert.NoError(t, err)
+
+	expectedIdsPerAge := getExpectedIdsPerAge(50)
+
+	dbAfterRestart, err := db.NewDB(testDbConfig)
+	assertAgeValuesFromDbSelect(t, dbAfterRestart, expectedIdsPerAge)
+}

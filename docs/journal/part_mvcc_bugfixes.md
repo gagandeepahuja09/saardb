@@ -113,3 +113,53 @@ Before MVCC:
   The lesson: tests with only unique keys don't exercise the "compacted file is much smaller than input files" path. You need tests with
    repeated keys to expose size-difference bugs. This was always possible even without MVCC (overwriting the same key via separate
   PUTs), but MVCC made it the default behavior.
+
+
+## Offset Bugfix
+
+You're right — you wouldn't start by suspecting indexOffsets. You start at the error and follow the wrong value one step at a time.
+
+  Step 1: Start at the error location                                                                                                   
+   
+  The error is "not enough bytes to read" in getValueFromSsTableDataBlock. You don't know WHY. Just add a print RIGHT THERE:            
+                                                                                                                                      
+  fmt.Printf("buffer size: %d, position: %d\n", len(ssTableDataBlockBuf), i)                                                            
+                                                                                                                                      
+  You'd see something like: buffer size: 12000, position: 11995. OK, the buffer is huge. Is that right?                                 
+   
+  Step 2: Is the buffer size reasonable?                                                                                                
+                                                                                                                                      
+  fmt.Printf("start: %d, end: %d, bufSize: %d\n",
+      dataBlockStartOffset, dataBlockEndOffset, dataBlockEndOffset-dataBlockStartOffset)                                                
+   
+  You'd see: start: 0, end: 12000, bufSize: 12000. Then check the file:                                                                 
+                                                                                                                                      
+  fileInfo, _ := ssTableFile.Stat()
+  fmt.Printf("file: %s, fileSize: %d\n", ssTableFile.Name(), fileInfo.Size())                                                           
+   
+  You'd see: file: temp/5.log, fileSize: 1200, bufSize: 12000                                                                           
+                                                                                                                                      
+  The buffer is 10x larger than the file. You don't need to know about indexOffsets yet. You just see an obviously wrong number.        
+   
+  Step 3: Where does the wrong endOffset come from?                                                                                     
+                                                                                                                                      
+  Go to the caller — one level up:                                                                                                      
+   
+  endOffset := st.indexOffsets[i]                                                                                                       
+  fmt.Printf("file index: %d, indexOffset: %d\n", i, endOffset)                                                                       
+
+  You'd see: file index: 0, indexOffset: 12000. But the file is 1200 bytes. The offset is wrong.                                        
+   
+  Step 4: When was indexOffsets last updated?                                                                                           
+                                                                                                                                      
+  Search your code: indexOffsets =. Find every assignment. Check if atomicSwap sets it. It doesn't. Bug found.                          
+   
+  ---                                                                                                                                   
+  The method is just:                                                                                                                 
+  1. Print values at the error location
+  2. See which one looks wrong         
+  3. Go to where that value comes from
+  4. Print again                      
+  5. Repeat until you find the source                                                                                                   
+                                     
+  You never need to "guess" the answer. Each print either looks right or obviously wrong. You just follow the wrong one.

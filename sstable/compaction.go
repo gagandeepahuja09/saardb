@@ -86,7 +86,7 @@ func (st *SsTable) RunCompaction() {
 		st.mutex.Unlock()
 	}()
 
-	// 2. build compacted entries
+	// 2. build compacted map
 	st.mutex.RLock()
 	filesToCompact := make([]*os.File, len(st.firstLevelFiles))
 	copy(filesToCompact, st.firstLevelFiles)
@@ -172,9 +172,3 @@ func (st *SsTable) atomicSwap(compactedFile *os.File, oldFiles []*os.File, compa
 	st.manifest.FileNames = fileNames
 	st.saveManifest()
 }
-
-// todo: we should have a test to assert that compaction captures all keys and those keys are in sorted order.
-// UT would have helped in 2 ways:
-// 1. clearly tell what the issue is
-// 2. set the standard even for an agent. Even LLM could have made same mistake especially for something which is entirely
-// new and with no documentation.

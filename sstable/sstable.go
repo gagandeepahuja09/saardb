@@ -340,9 +340,6 @@ func (st *SsTable) Get(key string) (string, error) {
 		if lowerBoundSliceIndex == -1 {
 			continue
 		}
-		// for the same key, multiple version can be present across multiple data files
-		// hece, we need to search till the end of index offset or if a greater key is found,
-		// whichever happens first.
 		endOffset := st.indexOffsets[i]
 		value, err := st.getValueFromSsTableDataBlock(file, key,
 			ssTableIndex[lowerBoundSliceIndex].offset, endOffset)
@@ -449,7 +446,6 @@ func (st *SsTable) getValueFromSsTableDataBlock(ssTableFile *os.File, key string
 	maxTxnIdValue := ""
 	var maxTxnId uint64 = 0
 	for i := 0; i < len(ssTableDataBlockBuf); {
-		// todo: utilise txnId in the next PR
 		if i+8 > len(ssTableDataBlockBuf) {
 			return "", errors.New("unexpected error while reading txnId")
 		}
