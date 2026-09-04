@@ -1,0 +1,16 @@
+docs/pr_descriptions/23.md
+  h_67b5b423f5fb35 1,3-4,6-69
+sstable/compaction.go
+  h_67b5b423f5fb35 103
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "25efdc96816616b752d6b0cd2eb959c419183918",
+  "prompts": {},
+  "humans": {
+    "h_67b5b423f5fb35": {
+      "author": "gagandeepahuja09 <gagandeepahuja09@gmail.com>"
+    }
+  }
+}
