@@ -143,7 +143,6 @@ func TestSsTableGetPicksLatestTxnIdWithoutCompaction(t *testing.T) {
 func getExpectedIdsPerAge(loopCount int) map[int][]string {
 	ageValues := []int{10, 15, 20, 25}
 
-	// outer loop will run 4 times, the final value would be as per j = 3
 	expectedIdsPerAge := map[int][]string{}
 	for i := 0; i < loopCount; i++ {
 		// outer loop will run 4 times, the final value would be as per j = 3

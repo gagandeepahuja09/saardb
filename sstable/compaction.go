@@ -100,6 +100,7 @@ func (st *SsTable) RunCompaction() {
 
 	// 3. get sorted keys. compacted file needs to have all keys in sorted order
 	// and during compaction we lost the order and that needs to be fixed.
+	// Each file is sorted but the files are not sorted across each other.
 	sortedKeys := sortedKeys(compactedMap)
 
 	// 4. create iterator function which calls the callback for each key-value-transactionId combination
