@@ -67,15 +67,15 @@ func NewDB(config Config) (*DB, error) {
 		return nil, err
 	}
 
-	db.tableNameVsSchemaMap, err = db.getTableNameVsSchemaMap()
-	if err != nil {
-		return nil, err
-	}
-
 	db.transactionManager = transactionManager{
 		nextTransactionId:     maxTxnId + 1,
 		mu:                    sync.Mutex{},
 		keyVsLocksAcquiredMap: map[string]*LocksAcquired{},
+	}
+
+	db.tableNameVsSchemaMap, err = db.getTableNameVsSchemaMap()
+	if err != nil {
+		return nil, err
 	}
 
 	return &db, err
@@ -147,7 +147,7 @@ func (db *DB) getWithSnapshot(key string, txnId uint64, activeTxnIds []uint64) (
 	defer db.mu.RUnlock()
 	value, ok := db.memTable.Get(key, txnId, activeTxnIds)
 	if !ok {
-		value, err = db.ssTable.Get(key)
+		value, err = db.ssTable.Get(key, txnId, activeTxnIds)
 	}
 	return value, err
 }

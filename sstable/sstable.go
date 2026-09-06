@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -326,7 +327,7 @@ func (st *SsTable) buildIndexFromFile(file *os.File) (int, []indexBlockEntry, er
 	return int(indexOffset), ssTableIndex, nil
 }
 
-func (st *SsTable) Get(key string) (string, error) {
+func (st *SsTable) Get(key string, txnId uint64, activeTxnIds []uint64) (string, error) {
 	st.mutex.RLock()
 	defer st.mutex.RUnlock()
 	if st.skipIndex {
@@ -342,32 +343,7 @@ func (st *SsTable) Get(key string) (string, error) {
 		}
 		endOffset := st.indexOffsets[i]
 		value, err := st.getValueFromSsTableDataBlock(file, key,
-			ssTableIndex[lowerBoundSliceIndex].offset, endOffset)
-		if value == "" && err == nil {
-			continue
-		}
-		return value, err
-	}
-	return "", nil
-}
-
-func (st *SsTable) GetForTransaction(key string, txnId uint64, activeTxnIds []uint64) (string, error) {
-	st.mutex.RLock()
-	defer st.mutex.RUnlock()
-	if st.skipIndex {
-		return st.linearSearch(key)
-	}
-	// newest file to oldest file
-	for i := len(st.firstLevelFiles) - 1; i >= 0; i-- {
-		file := st.firstLevelFiles[i]
-		ssTableIndex := st.indexBlocks[i]
-		lowerBoundSliceIndex := getLowerBound(key, ssTableIndex)
-		if lowerBoundSliceIndex == -1 {
-			continue
-		}
-		endOffset := st.indexOffsets[i]
-		value, err := st.getValueFromSsTableDataBlock(file, key,
-			ssTableIndex[lowerBoundSliceIndex].offset, endOffset)
+			ssTableIndex[lowerBoundSliceIndex].offset, endOffset, txnId, activeTxnIds)
 		if value == "" && err == nil {
 			continue
 		}
@@ -461,14 +437,14 @@ func (st *SsTable) sequentiallyScanTableAndUpdateMap(ssTableFile *os.File, table
 	return tableMap, nil
 }
 
-func (st *SsTable) getValueFromSsTableDataBlock(ssTableFile *os.File, key string, dataBlockStartOffset, dataBlockEndOffset int) (string, error) {
+func (st *SsTable) getValueFromSsTableDataBlock(ssTableFile *os.File, key string,
+	dataBlockStartOffset, dataBlockEndOffset int, readTxnId uint64, activeTxnIds []uint64) (string, error) {
 	ssTableDataBlockBuf := make([]byte, dataBlockEndOffset-dataBlockStartOffset)
 	_, err := ssTableFile.ReadAt(ssTableDataBlockBuf, int64(dataBlockStartOffset))
 	if err != nil && err != io.EOF {
 		return "", err
 	}
 	maxTxnIdValue := ""
-	var maxTxnId uint64 = 0
 	for i := 0; i < len(ssTableDataBlockBuf); {
 		if i+8 > len(ssTableDataBlockBuf) {
 			return "", errors.New("unexpected error while reading txnId")
@@ -485,13 +461,18 @@ func (st *SsTable) getValueFromSsTableDataBlock(ssTableFile *os.File, key string
 			return "", err
 		}
 		i += (4 + len(currentValue))
-		if currentKey == key && txnId > uint64(maxTxnId) {
-			maxTxnId = txnId
+		if currentKey == key && ((txnId == readTxnId) ||
+			txnId < readTxnId &&
+				// within a file, sstable is sorted as per memtable order: smallest key first.
+				// hence, the last key to satisfy this condition would have the latest value
+				!slices.Contains(activeTxnIds, txnId)) {
 			maxTxnIdValue = currentValue
 		} else if currentKey > key {
 			break
 		}
 	}
+	// latest txnId would always be found in the latest file. hence if the key is found
+	// + txnId conditions are satisfied, we can return and don't need to check in older files.
 	return maxTxnIdValue, nil
 }
 
