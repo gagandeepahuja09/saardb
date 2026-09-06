@@ -44,7 +44,7 @@ func (m *Memtable) Get(key string, txnId uint64, activeTxnIds []uint64) (string,
 			return false
 		}
 		// since txnIds are in ascending order, we pick the latest non-active one
-		if e.TxnId <= txnId && !slices.Contains(activeTxnIds, txnId) {
+		if (e.TxnId == txnId) || (e.TxnId < txnId && !slices.Contains(activeTxnIds, e.TxnId)) {
 			value = e.Value
 			found = true
 		}
