@@ -1,0 +1,20 @@
+db/db.go
+  h_67b5b423f5fb35 76-80,150
+docs/pr_descriptions/24.md
+  h_67b5b423f5fb35 36-48
+sstable/sstable.go
+  h_67b5b423f5fb35 9,330,346,440-441,464-468,474-475
+sstable_test.go
+  h_67b5b423f5fb35 110-124,130-132,138
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "729eabd1d8f1af3d6295bae9ba8427ae55440e76",
+  "prompts": {},
+  "humans": {
+    "h_67b5b423f5fb35": {
+      "author": "gagandeepahuja09 <gagandeepahuja09@gmail.com>"
+    }
+  }
+}
