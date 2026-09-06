@@ -17,6 +17,8 @@ type Transaction struct {
 	db               *DB
 	bufferedWriteMap map[string]string
 	lockAcquiredKeys []string
+	// implementing repeatable read first
+	activeTransactionsSnapshot []uint64
 }
 
 type walPutCommand struct {
@@ -120,7 +122,7 @@ func (txn *Transaction) Get(key string) (string, error) {
 	if value, ok := txn.bufferedWriteMap[key]; ok {
 		return value, nil
 	}
-	return txn.db.Get(key)
+	return txn.db.getWithSnapshot(key, txn.id, txn.activeTransactionsSnapshot)
 }
 
 func (txn *Transaction) releaseAllLocks() {

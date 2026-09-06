@@ -351,6 +351,31 @@ func (st *SsTable) Get(key string) (string, error) {
 	return "", nil
 }
 
+func (st *SsTable) GetForTransaction(key string, txnId uint64, activeTxnIds []uint64) (string, error) {
+	st.mutex.RLock()
+	defer st.mutex.RUnlock()
+	if st.skipIndex {
+		return st.linearSearch(key)
+	}
+	// newest file to oldest file
+	for i := len(st.firstLevelFiles) - 1; i >= 0; i-- {
+		file := st.firstLevelFiles[i]
+		ssTableIndex := st.indexBlocks[i]
+		lowerBoundSliceIndex := getLowerBound(key, ssTableIndex)
+		if lowerBoundSliceIndex == -1 {
+			continue
+		}
+		endOffset := st.indexOffsets[i]
+		value, err := st.getValueFromSsTableDataBlock(file, key,
+			ssTableIndex[lowerBoundSliceIndex].offset, endOffset)
+		if value == "" && err == nil {
+			continue
+		}
+		return value, err
+	}
+	return "", nil
+}
+
 // given the prefix key, PrefixScan returns the serialised key
 // and value in a map for all keys which match that prefix in the sstable.
 func (st *SsTable) PrefixScan(prefixKey string) (map[string]valueTxnId, error) {

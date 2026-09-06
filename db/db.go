@@ -32,6 +32,7 @@ type transactionManager struct {
 	nextTransactionId     uint64
 	mu                    sync.Mutex
 	keyVsLocksAcquiredMap map[string]*LocksAcquired
+	activeTransactions    []uint64
 }
 
 type DB struct {
@@ -86,7 +87,14 @@ func (db *DB) GetNextTransactionId() uint64 {
 
 func (db *DB) getTableNameVsSchemaMap() (map[string]sqlparser.CreateTable, error) {
 	tableNameVsSchemaMap := map[string]sqlparser.CreateTable{}
-	tablesString, err := db.Get(CatalogKey)
+
+	txn, err := db.Begin()
+	defer txn.Commit()
+	if err != nil {
+		return nil, err
+	}
+
+	tablesString, err := txn.Get(CatalogKey)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +104,7 @@ func (db *DB) getTableNameVsSchemaMap() (map[string]sqlparser.CreateTable, error
 
 	tableNames := strings.Split(tablesString, ",")
 	for _, tableName := range tableNames {
-		schemaStr, err := db.Get(fmt.Sprintf(SchemaTemplate, tableName))
+		schemaStr, err := txn.Get(fmt.Sprintf(SchemaTemplate, tableName))
 		if err != nil {
 			return nil, err
 		}
@@ -106,7 +114,7 @@ func (db *DB) getTableNameVsSchemaMap() (map[string]sqlparser.CreateTable, error
 		}
 		createTableInput.TableName = tableName
 
-		secondaryIndexesStr, err := db.Get(fmt.Sprintf(SecondaryIndexesCatalogKeyTemplate, tableName))
+		secondaryIndexesStr, err := txn.Get(fmt.Sprintf(SecondaryIndexesCatalogKeyTemplate, tableName))
 		if err != nil {
 			return nil, err
 		}
@@ -127,9 +135,17 @@ func (db *DB) Close() {
 }
 
 func (db *DB) Get(key string) (value string, err error) {
+	txn, err := db.Begin()
+	if err != nil {
+		return "", err
+	}
+	return txn.Get(key)
+}
+
+func (db *DB) getWithSnapshot(key string, txnId uint64, activeTxnIds []uint64) (value string, err error) {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
-	value, ok := db.memTable.Get(key)
+	value, ok := db.memTable.Get(key, txnId, activeTxnIds)
 	if !ok {
 		value, err = db.ssTable.Get(key)
 	}
@@ -279,8 +295,9 @@ func (db *DB) Begin() (*Transaction, error) {
 	defer db.transactionManager.mu.Unlock()
 
 	txn := Transaction{
-		id: db.transactionManager.nextTransactionId,
-		db: db,
+		id:                         db.transactionManager.nextTransactionId,
+		db:                         db,
+		activeTransactionsSnapshot: db.transactionManager.activeTransactions,
 	}
 	db.transactionManager.nextTransactionId++
 	return &txn, nil

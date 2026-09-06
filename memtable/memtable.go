@@ -1,6 +1,7 @@
 package memtable
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/google/btree"
@@ -34,7 +35,7 @@ func NewMemtable() Memtable {
 	}
 }
 
-func (m *Memtable) Get(key string) (string, bool) {
+func (m *Memtable) Get(key string, txnId uint64, activeTxnIds []uint64) (string, bool) {
 	value := ""
 	found := false
 	m.tree.AscendGreaterOrEqual(&Entry{Key: key}, func(item btree.Item) bool {
@@ -42,8 +43,11 @@ func (m *Memtable) Get(key string) (string, bool) {
 		if e.Key != key {
 			return false
 		}
-		value = e.Value
-		found = true
+		// since txnIds are in ascending order, we pick the latest non-active one
+		if e.TxnId <= txnId && !slices.Contains(activeTxnIds, txnId) {
+			value = e.Value
+			found = true
+		}
 		return true
 	})
 	return value, found
