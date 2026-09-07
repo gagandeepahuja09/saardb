@@ -123,24 +123,68 @@ func TestGetAndPutInBulk(t *testing.T) {
 // 	}
 // }
 
+func commitAndFlush(t *testing.T, txn *db.Transaction, dbInstance *db.DB) {
+	err := txn.Commit()
+	assert.NoError(t, err)
+	err = dbInstance.FlushMemtable()
+	assert.NoError(t, err)
+}
+
 func TestSsTableGetPicksLatestTxnIdWithoutCompaction(t *testing.T) {
 	defer dbDirCleanUp(t)
 
 	db, err := db.NewDB(testDbConfig)
-	fmt.Printf("err98: %+v\n", err)
 	assert.NoError(t, err)
-	buildTestDataForRepeatKeys(db, 10)
+
+	txn, err := db.Begin()
 	assert.NoError(t, err)
 
 	for i := 0; i < 10; i++ {
 		key := fmt.Sprintf("key_%d", i)
-		val, err := db.Get(key)
-		fmt.Printf("val8888: %v\n", val)
+		value := fmt.Sprintf("value_%d", i)
+		err := txn.Put(key, value)
 		assert.NoError(t, err)
-		expectedValue := fmt.Sprintf("value_%d", i+11)
-		assert.NoError(t, err)
-		assert.Equal(t, expectedValue, val)
 	}
+
+	commitAndFlush(t, txn, db)
+
+	// start txn1, start txn2, do some updates in txn2, then commit txn2
+	// txn1 read should still not have committed value of txn2. because txn2 was started later.
+	txn1, err := db.Begin()
+	assert.NoError(t, err)
+	txn2, err := db.Begin()
+	assert.NoError(t, err)
+	err = txn2.Put("key_9", "value_100")
+	assert.NoError(t, err)
+	commitAndFlush(t, txn2, db)
+	val, err := txn1.Get("key_9")
+	assert.NoError(t, err)
+	assert.Equal(t, "value_9", val)
+	commitAndFlush(t, txn1, db)
+
+	// start txn3, then start txn4
+	// do some updates in txn3 and commit and then read txn4. txn4 should not get committed value of txn3 as txn3 was active when txn3 started
+	// but txn4 should get committed value of txn2 as it started after txn2 commit and hence not part of its
+	// active transactions snapshot.
+	txn3, err := db.Begin()
+	assert.NoError(t, err)
+	txn4, err := db.Begin()
+	assert.NoError(t, err)
+	err = txn3.Put("key_9", "value_200")
+	assert.NoError(t, err)
+	commitAndFlush(t, txn3, db)
+	val, err = txn4.Get("key_9")
+	assert.NoError(t, err)
+	assert.Equal(t, "value_100", val)
+	commitAndFlush(t, txn4, db)
+
+	txn5, err := db.Begin()
+	assert.NoError(t, err)
+	val, err = txn5.Get("key_9")
+	assert.NoError(t, err)
+	assert.Equal(t, "value_200", val)
+
+	// todo: add test to show that readers and writers don't block each other
 }
 
 func getExpectedIdsPerAge(loopCount int) map[int][]string {

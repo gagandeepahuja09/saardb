@@ -18,7 +18,7 @@ type Transaction struct {
 	bufferedWriteMap map[string]string
 	lockAcquiredKeys []string
 	// implementing repeatable read first
-	activeTransactionsSnapshot []uint64
+	activeTransactionsSnapshot map[uint64]struct{}
 }
 
 type walPutCommand struct {
@@ -50,6 +50,9 @@ func (txn *Transaction) tryAcquireWriteLock(key string) error {
 				readLockAlreadyAcquired = true
 				locksAcquired.readerTxnIds = []uint64{}
 			} else {
+				// todo: need to update this. readers cannot block writers.
+				// this is another learning. thinking about all of the edge case beforehand is pretty
+				// hard. we encounter and think about a lot of cases only during development.
 				return errors.New(WriteLockNotAcquiredDueToReadLocksError)
 			}
 		}
@@ -160,6 +163,7 @@ func (txn *Transaction) cleanupBufferedWriteMap() {
 func (txn *Transaction) Rollback() {
 	txn.releaseAllLocks()
 	txn.cleanupBufferedWriteMap()
+	delete(txn.db.transactionManager.activeTransactionsMap, txn.id)
 }
 
 // payload structure:
@@ -234,6 +238,8 @@ func (txn *Transaction) Commit() error {
 
 	txn.releaseAllLocks()
 	txn.cleanupBufferedWriteMap()
+
+	delete(txn.db.transactionManager.activeTransactionsMap, txn.id)
 
 	return nil
 }

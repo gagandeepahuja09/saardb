@@ -17,7 +17,7 @@ func TestGetReturnsLatestVersion(t *testing.T) {
 
 	testCases := []struct {
 		txnId             uint64
-		activeTxnIds      []uint64
+		activeTxnMap      map[uint64]struct{}
 		expectedName      string
 		expectedCity      string
 		expectedFoundName bool
@@ -25,63 +25,88 @@ func TestGetReturnsLatestVersion(t *testing.T) {
 	}{
 		{
 			txnId:        0,
-			activeTxnIds: nil,
+			activeTxnMap: nil,
 		},
 		{
 			txnId:        0,
-			activeTxnIds: []uint64{0},
+			activeTxnMap: map[uint64]struct{}{0: struct{}{}},
 		},
 		{
 			txnId:             1,
-			activeTxnIds:      []uint64{1},
+			activeTxnMap:      map[uint64]struct{}{1: struct{}{}},
 			expectedName:      "Gagan",
 			expectedCity:      "Bengaluru",
 			expectedFoundName: true,
 			expectedFoundCity: true,
 		},
 		{
-			txnId:             2,
-			activeTxnIds:      []uint64{1, 2},
+			txnId: 2,
+			activeTxnMap: map[uint64]struct{}{
+				1: struct{}{},
+				2: struct{}{},
+			},
 			expectedName:      "",
 			expectedCity:      "Delhi",
 			expectedFoundName: false,
 			expectedFoundCity: true,
 		},
 		{
-			txnId:             3,
-			activeTxnIds:      []uint64{1, 2, 3},
+			txnId: 3,
+			activeTxnMap: map[uint64]struct{}{
+				1: struct{}{},
+				2: struct{}{},
+				3: struct{}{},
+			},
 			expectedName:      "Akash",
 			expectedCity:      "",
 			expectedFoundName: true,
 			expectedFoundCity: false,
 		},
 		{
-			txnId:             3,
-			activeTxnIds:      []uint64{1, 3},
+			txnId: 3,
+			activeTxnMap: map[uint64]struct{}{
+				1: struct{}{},
+				3: struct{}{},
+			},
 			expectedName:      "Akash",
 			expectedCity:      "Delhi",
 			expectedFoundName: true,
 			expectedFoundCity: true,
 		},
 		{
-			txnId:             4,
-			activeTxnIds:      []uint64{2, 3},
+			txnId: 4,
+			activeTxnMap: map[uint64]struct{}{
+				2: struct{}{},
+				3: struct{}{},
+			},
 			expectedName:      "Gagan",
 			expectedCity:      "Bengaluru",
 			expectedFoundName: true,
 			expectedFoundCity: true,
 		},
 		{
-			txnId:             5,
-			activeTxnIds:      []uint64{1, 2, 3, 4, 5, 6},
+			txnId: 5,
+			activeTxnMap: map[uint64]struct{}{
+				1: struct{}{},
+				2: struct{}{},
+				3: struct{}{},
+				4: struct{}{},
+				5: struct{}{},
+				6: struct{}{},
+			},
 			expectedName:      "Ansh",
 			expectedCity:      "",
 			expectedFoundName: true,
 			expectedFoundCity: false,
 		},
 		{
-			txnId:             6,
-			activeTxnIds:      []uint64{1, 2, 3, 6},
+			txnId: 6,
+			activeTxnMap: map[uint64]struct{}{
+				1: struct{}{},
+				2: struct{}{},
+				3: struct{}{},
+				6: struct{}{},
+			},
 			expectedName:      "Ansh",
 			expectedCity:      "Mumbai",
 			expectedFoundName: true,
@@ -90,20 +115,13 @@ func TestGetReturnsLatestVersion(t *testing.T) {
 	}
 
 	for _, tt := range testCases {
-		name, foundName := mem.Get("name", tt.txnId, tt.activeTxnIds)
-		city, foundCity := mem.Get("city", tt.txnId, tt.activeTxnIds)
+		name, foundName := mem.Get("name", tt.txnId, tt.activeTxnMap)
+		city, foundCity := mem.Get("city", tt.txnId, tt.activeTxnMap)
 		assert.Equal(t, tt.expectedName, name)
 		assert.Equal(t, tt.expectedCity, city)
 		assert.Equal(t, tt.expectedFoundName, foundName)
 		assert.Equal(t, tt.expectedFoundCity, foundCity)
 	}
-
-	// name, foundName = mem.Get("name", 1, nil)
-	// city, foundCity = mem.Get("city", 1, nil)
-	// assert.Equal(t, "", name)
-	// assert.Equal(t, true, foundName)
-	// assert.Equal(t, "", city)
-	// assert.Equal(t, true, foundCity)
 }
 
 func TestPrefixScanReturnsLatestVersions(t *testing.T) {

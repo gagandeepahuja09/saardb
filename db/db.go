@@ -32,7 +32,7 @@ type transactionManager struct {
 	nextTransactionId     uint64
 	mu                    sync.Mutex
 	keyVsLocksAcquiredMap map[string]*LocksAcquired
-	activeTransactions    []uint64
+	activeTransactionsMap map[uint64]struct{}
 }
 
 type DB struct {
@@ -71,6 +71,7 @@ func NewDB(config Config) (*DB, error) {
 		nextTransactionId:     maxTxnId + 1,
 		mu:                    sync.Mutex{},
 		keyVsLocksAcquiredMap: map[string]*LocksAcquired{},
+		activeTransactionsMap: map[uint64]struct{}{},
 	}
 
 	db.tableNameVsSchemaMap, err = db.getTableNameVsSchemaMap()
@@ -142,12 +143,12 @@ func (db *DB) Get(key string) (value string, err error) {
 	return txn.Get(key)
 }
 
-func (db *DB) getWithSnapshot(key string, txnId uint64, activeTxnIds []uint64) (value string, err error) {
+func (db *DB) getWithSnapshot(key string, txnId uint64, activeTxnMap map[uint64]struct{}) (value string, err error) {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
-	value, ok := db.memTable.Get(key, txnId, activeTxnIds)
+	value, ok := db.memTable.Get(key, txnId, activeTxnMap)
 	if !ok {
-		value, err = db.ssTable.Get(key, txnId, activeTxnIds)
+		value, err = db.ssTable.Get(key, txnId, activeTxnMap)
 	}
 	return value, err
 }
@@ -159,6 +160,10 @@ func (db *DB) createSsTableAndClearWalAndMemTable() error {
 	db.memTable.Clear()
 	db.wal.Clear()
 	return nil
+}
+
+func (db *DB) FlushMemtable() error {
+	return db.createSsTableAndClearWalAndMemTable()
 }
 
 func (db *DB) Put(key, value string) error {
@@ -294,11 +299,19 @@ func (db *DB) Begin() (*Transaction, error) {
 	db.transactionManager.mu.Lock()
 	defer db.transactionManager.mu.Unlock()
 
+	db.transactionManager.activeTransactionsMap[db.transactionManager.nextTransactionId] = struct{}{}
+
 	txn := Transaction{
-		id:                         db.transactionManager.nextTransactionId,
-		db:                         db,
-		activeTransactionsSnapshot: db.transactionManager.activeTransactions,
+		id: db.transactionManager.nextTransactionId,
+		db: db,
 	}
+
+	// intentional shallow copy as activeTransactionsMap would get updated during Begin and Commit
+	txn.activeTransactionsSnapshot = map[uint64]struct{}{}
+	for key, val := range db.transactionManager.activeTransactionsMap {
+		txn.activeTransactionsSnapshot[key] = val
+	}
+
 	db.transactionManager.nextTransactionId++
 	return &txn, nil
 }

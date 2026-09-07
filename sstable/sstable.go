@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
 	"strings"
 	"sync"
 )
@@ -327,7 +326,7 @@ func (st *SsTable) buildIndexFromFile(file *os.File) (int, []indexBlockEntry, er
 	return int(indexOffset), ssTableIndex, nil
 }
 
-func (st *SsTable) Get(key string, txnId uint64, activeTxnIds []uint64) (string, error) {
+func (st *SsTable) Get(key string, txnId uint64, activeTxnMap map[uint64]struct{}) (string, error) {
 	st.mutex.RLock()
 	defer st.mutex.RUnlock()
 	if st.skipIndex {
@@ -343,7 +342,7 @@ func (st *SsTable) Get(key string, txnId uint64, activeTxnIds []uint64) (string,
 		}
 		endOffset := st.indexOffsets[i]
 		value, err := st.getValueFromSsTableDataBlock(file, key,
-			ssTableIndex[lowerBoundSliceIndex].offset, endOffset, txnId, activeTxnIds)
+			ssTableIndex[lowerBoundSliceIndex].offset, endOffset, txnId, activeTxnMap)
 		if value == "" && err == nil {
 			continue
 		}
@@ -438,7 +437,8 @@ func (st *SsTable) sequentiallyScanTableAndUpdateMap(ssTableFile *os.File, table
 }
 
 func (st *SsTable) getValueFromSsTableDataBlock(ssTableFile *os.File, key string,
-	dataBlockStartOffset, dataBlockEndOffset int, readTxnId uint64, activeTxnIds []uint64) (string, error) {
+	dataBlockStartOffset, dataBlockEndOffset int, readTxnId uint64, activeTxnMap map[uint64]struct{}) (
+	string, error) {
 	ssTableDataBlockBuf := make([]byte, dataBlockEndOffset-dataBlockStartOffset)
 	_, err := ssTableFile.ReadAt(ssTableDataBlockBuf, int64(dataBlockStartOffset))
 	if err != nil && err != io.EOF {
@@ -461,11 +461,10 @@ func (st *SsTable) getValueFromSsTableDataBlock(ssTableFile *os.File, key string
 			return "", err
 		}
 		i += (4 + len(currentValue))
-		if currentKey == key && ((txnId == readTxnId) ||
-			txnId < readTxnId &&
-				// within a file, sstable is sorted as per memtable order: smallest key first.
-				// hence, the last key to satisfy this condition would have the latest value
-				!slices.Contains(activeTxnIds, txnId)) {
+		_, isTxnActive := activeTxnMap[txnId]
+		// within a file, sstable is sorted as per memtable order: smallest key first.
+		// hence, the last key to satisfy this condition would have the latest value
+		if currentKey == key && ((txnId == readTxnId) || txnId < readTxnId && !isTxnActive) {
 			maxTxnIdValue = currentValue
 		} else if currentKey > key {
 			break
