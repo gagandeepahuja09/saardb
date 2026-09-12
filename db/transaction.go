@@ -17,6 +17,8 @@ type Transaction struct {
 	db               *DB
 	bufferedWriteMap map[string]string
 	lockAcquiredKeys []string
+	// implementing repeatable read first
+	activeTransactionsSnapshot map[uint64]struct{}
 }
 
 type walPutCommand struct {
@@ -26,7 +28,6 @@ type walPutCommand struct {
 
 func (txn *Transaction) tryAcquireWriteLock(key string) error {
 	locksAcquired, ok := txn.db.transactionManager.keyVsLocksAcquiredMap[key]
-	readLockAlreadyAcquired := false
 	if !ok {
 		locksAcquired = &LocksAcquired{}
 	} else {
@@ -38,57 +39,10 @@ func (txn *Transaction) tryAcquireWriteLock(key string) error {
 		if writerTxnId == txn.id {
 			return nil
 		}
-
-		readerTxnIds := locksAcquired.readerTxnIds
-		if len(readerTxnIds) > 1 {
-			return errors.New(WriteLockNotAcquiredDueToReadLocksError)
-		}
-		if len(readerTxnIds) == 1 {
-			if readerTxnIds[0] == txn.id {
-				readLockAlreadyAcquired = true
-				locksAcquired.readerTxnIds = []uint64{}
-			} else {
-				return errors.New(WriteLockNotAcquiredDueToReadLocksError)
-			}
-		}
 	}
 	locksAcquired.writerTxnId = txn.id
 	if txn.lockAcquiredKeys == nil {
 		txn.lockAcquiredKeys = []string{}
-	}
-	if !readLockAlreadyAcquired {
-		txn.lockAcquiredKeys = append(txn.lockAcquiredKeys, key)
-	}
-	txn.db.transactionManager.keyVsLocksAcquiredMap[key] = locksAcquired
-	return nil
-}
-
-func (txn *Transaction) tryAcquireReadLock(key string) error {
-	locksAcquired, ok := txn.db.transactionManager.keyVsLocksAcquiredMap[key]
-	writeLockAlreadyAcquired := false
-	if !ok {
-		locksAcquired = &LocksAcquired{}
-	} else {
-		writerTxnId := locksAcquired.writerTxnId
-		if writerTxnId != 0 {
-			if writerTxnId != txn.id {
-				return fmt.Errorf("cannot acquire read lock as write lock acquired by transaction '%d'", writerTxnId)
-			} else {
-				writeLockAlreadyAcquired = true
-			}
-		}
-	}
-	for _, txnId := range locksAcquired.readerTxnIds {
-		if txnId == txn.id {
-			return nil
-		}
-	}
-	locksAcquired.readerTxnIds = append(locksAcquired.readerTxnIds, txn.id)
-	if txn.lockAcquiredKeys == nil {
-		txn.lockAcquiredKeys = []string{}
-	}
-	if !writeLockAlreadyAcquired {
-		txn.lockAcquiredKeys = append(txn.lockAcquiredKeys, key)
 	}
 	txn.db.transactionManager.keyVsLocksAcquiredMap[key] = locksAcquired
 	return nil
@@ -112,15 +66,11 @@ func (txn *Transaction) Put(key, value string) error {
 
 func (txn *Transaction) Get(key string) (string, error) {
 	txn.db.transactionManager.mu.Lock()
-	err := txn.tryAcquireReadLock(key)
 	txn.db.transactionManager.mu.Unlock()
-	if err != nil {
-		return "", err
-	}
 	if value, ok := txn.bufferedWriteMap[key]; ok {
 		return value, nil
 	}
-	return txn.db.Get(key)
+	return txn.db.getWithSnapshot(key, txn.id, txn.activeTransactionsSnapshot)
 }
 
 func (txn *Transaction) releaseAllLocks() {
@@ -158,6 +108,7 @@ func (txn *Transaction) cleanupBufferedWriteMap() {
 func (txn *Transaction) Rollback() {
 	txn.releaseAllLocks()
 	txn.cleanupBufferedWriteMap()
+	delete(txn.db.transactionManager.activeTransactionsMap, txn.id)
 }
 
 // payload structure:
@@ -232,6 +183,8 @@ func (txn *Transaction) Commit() error {
 
 	txn.releaseAllLocks()
 	txn.cleanupBufferedWriteMap()
+
+	delete(txn.db.transactionManager.activeTransactionsMap, txn.id)
 
 	return nil
 }

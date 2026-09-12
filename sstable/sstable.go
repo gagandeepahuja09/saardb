@@ -326,7 +326,7 @@ func (st *SsTable) buildIndexFromFile(file *os.File) (int, []indexBlockEntry, er
 	return int(indexOffset), ssTableIndex, nil
 }
 
-func (st *SsTable) Get(key string) (string, error) {
+func (st *SsTable) Get(key string, txnId uint64, activeTxnMap map[uint64]struct{}) (string, error) {
 	st.mutex.RLock()
 	defer st.mutex.RUnlock()
 	if st.skipIndex {
@@ -342,7 +342,7 @@ func (st *SsTable) Get(key string) (string, error) {
 		}
 		endOffset := st.indexOffsets[i]
 		value, err := st.getValueFromSsTableDataBlock(file, key,
-			ssTableIndex[lowerBoundSliceIndex].offset, endOffset)
+			ssTableIndex[lowerBoundSliceIndex].offset, endOffset, txnId, activeTxnMap)
 		if value == "" && err == nil {
 			continue
 		}
@@ -436,14 +436,15 @@ func (st *SsTable) sequentiallyScanTableAndUpdateMap(ssTableFile *os.File, table
 	return tableMap, nil
 }
 
-func (st *SsTable) getValueFromSsTableDataBlock(ssTableFile *os.File, key string, dataBlockStartOffset, dataBlockEndOffset int) (string, error) {
+func (st *SsTable) getValueFromSsTableDataBlock(ssTableFile *os.File, key string,
+	dataBlockStartOffset, dataBlockEndOffset int, readTxnId uint64, activeTxnMap map[uint64]struct{}) (
+	string, error) {
 	ssTableDataBlockBuf := make([]byte, dataBlockEndOffset-dataBlockStartOffset)
 	_, err := ssTableFile.ReadAt(ssTableDataBlockBuf, int64(dataBlockStartOffset))
 	if err != nil && err != io.EOF {
 		return "", err
 	}
 	maxTxnIdValue := ""
-	var maxTxnId uint64 = 0
 	for i := 0; i < len(ssTableDataBlockBuf); {
 		if i+8 > len(ssTableDataBlockBuf) {
 			return "", errors.New("unexpected error while reading txnId")
@@ -460,13 +461,17 @@ func (st *SsTable) getValueFromSsTableDataBlock(ssTableFile *os.File, key string
 			return "", err
 		}
 		i += (4 + len(currentValue))
-		if currentKey == key && txnId > uint64(maxTxnId) {
-			maxTxnId = txnId
+		_, isTxnActive := activeTxnMap[txnId]
+		// within a file, sstable is sorted as per memtable order: smallest key first.
+		// hence, the last key to satisfy this condition would have the latest value
+		if currentKey == key && ((txnId == readTxnId) || txnId < readTxnId && !isTxnActive) {
 			maxTxnIdValue = currentValue
 		} else if currentKey > key {
 			break
 		}
 	}
+	// latest txnId would always be found in the latest file. hence if the key is found
+	// + txnId conditions are satisfied, we can return and don't need to check in older files.
 	return maxTxnIdValue, nil
 }
 

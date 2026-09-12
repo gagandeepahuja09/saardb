@@ -50,7 +50,7 @@ func TestSameTransactionPutAndGet(t *testing.T) {
 	assert.Equal(t, expectedValue, val)
 }
 
-// t1 acquires read lock first. t1 upgrades to write lock. t2 will not be able to acquire read lock after that.
+// t1 acquires read lock first. t1 upgrades to write lock. t2 will still able to acquire read lock.
 func TestDifferentTransactionPutAndGetWithPutAcquiringLock(t *testing.T) {
 	dbInstance, cleanupFunc, err := newDBForTest()
 	defer cleanupFunc()
@@ -72,10 +72,10 @@ func TestDifferentTransactionPutAndGetWithPutAcquiringLock(t *testing.T) {
 	assert.Nil(t, err)
 
 	_, err = txn2.Get(testKey)
-	assert.Equal(t, "cannot acquire read lock as write lock acquired by transaction '1'", err.Error())
+	assert.NoError(t, err)
 }
 
-// t1 acquires read lock first, hence t2 will not be able to acquire write lock
+// t1 acquires read lock first, t2 will be able to acquire write lock
 func TestDifferentTransactionPutAndGetWithGetAcquiringLock(t *testing.T) {
 	dbInstance, cleanupFunc, err := newDBForTest()
 	defer cleanupFunc()
@@ -93,7 +93,7 @@ func TestDifferentTransactionPutAndGetWithGetAcquiringLock(t *testing.T) {
 	assert.Nil(t, err)
 
 	err = txn2.Put(testKey, "value")
-	assert.Equal(t, "cannot acquire write lock as read lock acquired by one or more transactions", err.Error())
+	assert.NoError(t, err)
 }
 
 // multiple transactions should be able to acquire read lock for a key at the same time
@@ -167,10 +167,10 @@ func TestDifferentOpenTransactionPutWithSameKey(t *testing.T) {
 	assert.Nil(t, err)
 
 	err = txn2.Put(testKey, expectedValue)
-	assert.Equal(t, "cannot acquire write lock as write lock acquired by transaction '1'", err.Error())
+	assert.Equal(t, "cannot acquire write lock as write lock acquired by transaction '2'", err.Error())
 }
 
-// t1 acquires write lock, t2 will not be able to acquire read lock
+// t1 acquires write lock, t2 will be able to acquire read lock and reads old value
 // t2 rollsback, t2 will be able to read and reads an old value
 func TestRollbackReleasesLockAndCleansUpBufferedWrite(t *testing.T) {
 	dbInstance, cleanupFunc, err := newDBForTest()
@@ -193,8 +193,9 @@ func TestRollbackReleasesLockAndCleansUpBufferedWrite(t *testing.T) {
 	txn2, err := dbInstance.Begin()
 	assert.Nil(t, err)
 
-	_, err = txn2.Get(testKey)
-	assert.Equal(t, "cannot acquire read lock as write lock acquired by transaction '1'", err.Error())
+	val, err = txn2.Get(testKey)
+	assert.Nil(t, err)
+	assert.Equal(t, "", val)
 
 	txn.Rollback()
 
@@ -204,7 +205,7 @@ func TestRollbackReleasesLockAndCleansUpBufferedWrite(t *testing.T) {
 }
 
 // t1 acquires write lock and does multiple write operations
-// t2 will not be able to acquire read lock on any of the keys
+// t2 will be able to read values of all of the keys and gets empty result
 // t1 commits
 // t3 starts in a new db instance requiring to build memtable from wal during init
 // reads from t3 return all updated values as per updates by t1
@@ -225,8 +226,9 @@ func TestCommitReleasesLockAndPersistsAllWrites(t *testing.T) {
 	assert.Nil(t, err)
 
 	for i := 200; i <= 210; i++ {
-		_, err := txn2.Get(fmt.Sprintf("key_%d", i))
-		assert.Equal(t, "cannot acquire read lock as write lock acquired by transaction '1'", err.Error())
+		val, err := txn2.Get(fmt.Sprintf("key_%d", i))
+		assert.Nil(t, err)
+		assert.Equal(t, "", val)
 	}
 
 	txn.Commit()
@@ -245,8 +247,7 @@ func TestCommitReleasesLockAndPersistsAllWrites(t *testing.T) {
 }
 
 // t1 to t11: 11 transactions parallely try to acquire write lock, only 1 should succeed.
-// when all of them try to read, only 1 should succeed which is the transaction which acquired the
-// write lock.
+// when all of them try to read, all should succeed
 // after commit, also assert the value with db.Get.
 func TestPutAndGetRaceConditionOnlyOneShouldAcquireWriteLock(t *testing.T) {
 	dbInstance, cleanupFunc, err := newDBForTest()
@@ -270,6 +271,7 @@ func TestPutAndGetRaceConditionOnlyOneShouldAcquireWriteLock(t *testing.T) {
 	var getErrCount atomic.Int32
 
 	expectedValue := ""
+	putSucceededTxn := 0
 
 	for i := 0; i <= 10; i++ {
 		go func() {
@@ -278,6 +280,8 @@ func TestPutAndGetRaceConditionOnlyOneShouldAcquireWriteLock(t *testing.T) {
 				hasExpectedErrorPrefix := strings.HasPrefix(putErr.Error(), "cannot acquire write lock as write lock acquired by transaction")
 				assert.True(t, hasExpectedErrorPrefix)
 				putErrCount.Add(1)
+			} else {
+				putSucceededTxn = i
 			}
 
 			val, getErr := txns[i].Get(commonKey)
@@ -286,8 +290,12 @@ func TestPutAndGetRaceConditionOnlyOneShouldAcquireWriteLock(t *testing.T) {
 				assert.True(t, hasExpectedErrorPrefix)
 				getErrCount.Add(1)
 			} else {
-				expectedValue = val
-				assert.Equal(t, fmt.Sprintf("value_%d", i), val)
+				if i == putSucceededTxn {
+					expectedValue = val
+					assert.Equal(t, fmt.Sprintf("value_%d", i), val)
+				} else {
+					assert.Equal(t, "", val)
+				}
 			}
 			txns[i].Commit()
 			wg.Done()
@@ -296,7 +304,7 @@ func TestPutAndGetRaceConditionOnlyOneShouldAcquireWriteLock(t *testing.T) {
 	wg.Wait()
 
 	assert.Equal(t, int32(10), putErrCount.Load())
-	assert.Equal(t, int32(10), getErrCount.Load())
+	assert.Equal(t, int32(0), getErrCount.Load())
 
 	val, err := dbInstance.Get(commonKey)
 	assert.Nil(t, err)
