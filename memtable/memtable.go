@@ -79,7 +79,7 @@ func (m *Memtable) Put(key, value string, txnId uint64) {
 
 // given the prefix key, PrefixScan returns the serialised key
 // and value in a map for all keys which match that prefix in the memtable.
-func (m *Memtable) PrefixScan(prefixKey string) map[string]string {
+func (m *Memtable) PrefixScan(prefixKey string, txnId uint64, activeTxnMap map[uint64]struct{}) map[string]string {
 	tableMap := map[string]string{}
 	m.tree.AscendGreaterOrEqual(&Entry{Key: prefixKey}, func(item btree.Item) bool {
 		e := item.(*Entry)
@@ -87,7 +87,11 @@ func (m *Memtable) PrefixScan(prefixKey string) map[string]string {
 		if !strings.HasPrefix(key, prefixKey) {
 			return false
 		}
-		tableMap[key] = e.Value
+		// since txnIds are in ascending order, we pick the latest non-active one for each key
+		_, isTxnActive := activeTxnMap[e.TxnId]
+		if e.TxnId == txnId || (e.TxnId < txnId && !isTxnActive) {
+			tableMap[key] = e.Value
+		}
 		return true
 	})
 	return tableMap

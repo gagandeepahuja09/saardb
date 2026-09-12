@@ -6,7 +6,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestGetReturnsLatestVersion(t *testing.T) {
+// visible: only read transactions started before current txn and non-active + current txn
+// within the visible ones, return the latest one
+func TestGetReturnsVisibleVersion(t *testing.T) {
 	mem := NewMemtable()
 	mem.Put("name", "Gagan", 1)
 	mem.Put("city", "Delhi", 2)
@@ -130,9 +132,66 @@ func TestPrefixScanReturnsLatestVersions(t *testing.T) {
 	mem.Put("users:2", "Bob", 2)
 	mem.Put("users:1", "Alice2", 3)
 
-	result := mem.PrefixScan("users:")
-	assert.Equal(t, "Alice2", result["users:1"])
-	assert.Equal(t, "Bob", result["users:2"])
+	testCases := []struct {
+		txnId        uint64
+		activeTxnMap map[uint64]struct{}
+		expectedMap  map[string]string
+	}{
+		{
+			txnId: 1,
+			expectedMap: map[string]string{
+				"users:1": "Alice",
+			},
+			activeTxnMap: map[uint64]struct{}{
+				1: struct{}{},
+			},
+		},
+		{
+			txnId: 2,
+			expectedMap: map[string]string{
+				"users:2": "Bob",
+			},
+			activeTxnMap: map[uint64]struct{}{
+				1: struct{}{},
+				2: struct{}{},
+			},
+		},
+		{
+			txnId: 2,
+			expectedMap: map[string]string{
+				"users:1": "Alice",
+				"users:2": "Bob",
+			},
+			activeTxnMap: map[uint64]struct{}{
+				2: struct{}{},
+			},
+		},
+		{
+			txnId: 3,
+			expectedMap: map[string]string{
+				"users:1": "Alice2",
+			},
+			activeTxnMap: map[uint64]struct{}{
+				2: struct{}{},
+				3: struct{}{},
+			},
+		},
+		{
+			txnId: 3,
+			expectedMap: map[string]string{
+				"users:1": "Alice2",
+				"users:2": "Bob",
+			},
+			activeTxnMap: map[uint64]struct{}{
+				3: struct{}{},
+			},
+		},
+	}
+
+	for _, tt := range testCases {
+		result := mem.PrefixScan("users:", tt.txnId, tt.activeTxnMap)
+		assert.Equal(t, tt.expectedMap, result)
+	}
 }
 
 func TestGetNonExistentKey(t *testing.T) {

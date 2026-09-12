@@ -116,12 +116,12 @@ func (db *DB) filterQueryConditions(tableName string, queryConditions []sqlparse
 	return queryResult, nil
 }
 
-func (db *DB) runFullTableScanAndFilterConditions(tableName string, selectFromTableInput sqlparser.SelectFromTable) ([][]string, error) {
-	queryResult, err := db.fullTableScan(tableName)
+func (txn *Transaction) runFullTableScanAndFilterConditions(tableName string, selectFromTableInput sqlparser.SelectFromTable) ([][]string, error) {
+	queryResult, err := txn.db.fullTableScan(tableName, txn.id, txn.activeTransactionsSnapshot)
 	if err != nil {
 		return nil, err
 	}
-	return db.filterQueryConditions(tableName, selectFromTableInput.QueryConditions,
+	return txn.db.filterQueryConditions(tableName, selectFromTableInput.QueryConditions,
 		[]string{}, queryResult)
 }
 
@@ -129,7 +129,7 @@ func (db *DB) runFullTableScanAndFilterConditions(tableName string, selectFromTa
 func (txn *Transaction) getQueryResultFromSecondaryIndexIfApplicable(tableName string, selectFromTableInput sqlparser.SelectFromTable, schema sqlparser.CreateTable) ([][]string, error) {
 	secondaryIndex, colsCoveredInSecIndex := getSecondaryIndexForQueryIfApplicable(selectFromTableInput, schema.SecondaryIndexes)
 	if secondaryIndex == nil {
-		return txn.db.runFullTableScanAndFilterConditions(tableName, selectFromTableInput)
+		return txn.runFullTableScanAndFilterConditions(tableName, selectFromTableInput)
 	}
 	indexCoveredColValues := []string{}
 
@@ -141,7 +141,7 @@ func (txn *Transaction) getQueryResultFromSecondaryIndexIfApplicable(tableName s
 		}
 	}
 	prefixKey := getSecondaryIndexKeyOrPrefix(tableName, secondaryIndex.IndexName, indexCoveredColValues, "")
-	primaryKeyIds, err := txn.db.secondaryIndexPrefixScan(prefixKey)
+	primaryKeyIds, err := txn.db.secondaryIndexPrefixScan(prefixKey, txn.id, txn.activeTransactionsSnapshot)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +204,7 @@ func (txn *Transaction) SelectFromTable(selectFromTableInput sqlparser.SelectFro
 		return [][]string{rowValues}, nil
 	}
 	if isFullTableScanQuery(selectFromTableInput) {
-		return db.fullTableScan(tableName)
+		return db.fullTableScan(tableName, txn.id, txn.activeTransactionsSnapshot)
 	}
 
 	return txn.getQueryResultFromSecondaryIndexIfApplicable(tableName, selectFromTableInput, schema)
@@ -242,9 +242,10 @@ func (db *DB) deserializeRowValues(tableName, value string) ([]string, error) {
 	return rowValues, nil
 }
 
-func (db *DB) fullTableScan(tableName string) ([][]string, error) {
+func (db *DB) fullTableScan(tableName string, readTxnId uint64, activeTxnMap map[uint64]struct{}) ([][]string, error) {
 	key := fmt.Sprintf("%s:", tableName)
-	memTableMap := db.memTable.PrefixScan(key)
+	// need to pass readTxnId and activeTxnMap in both
+	memTableMap := db.memTable.PrefixScan(key, readTxnId, activeTxnMap)
 	ssTableMap, err := db.ssTable.PrefixScan(key)
 	if err != nil {
 		return nil, err
@@ -274,8 +275,8 @@ func (db *DB) fullTableScan(tableName string) ([][]string, error) {
 }
 
 // returns an array of primary key IDs which satisfy the index.
-func (db *DB) secondaryIndexPrefixScan(prefixKey string) ([]string, error) {
-	memTableMap := db.memTable.PrefixScan(prefixKey)
+func (db *DB) secondaryIndexPrefixScan(prefixKey string, readTxnId uint64, activeTxnMap map[uint64]struct{}) ([]string, error) {
+	memTableMap := db.memTable.PrefixScan(prefixKey, readTxnId, activeTxnMap)
 	ssTableMap, err := db.ssTable.PrefixScan(prefixKey)
 	if err != nil {
 		return nil, err
