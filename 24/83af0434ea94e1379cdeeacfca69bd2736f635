@@ -1,0 +1,19 @@
+sstable/sstable.go
+  s_a313e360f7c982::t_57fb9251dd3742 356,379,400-401,425-430,432-433
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2483af0434ea94e1379cdeeacfca69bd2736f635",
+  "prompts": {},
+  "sessions": {
+    "s_a313e360f7c982": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6611cf0c-e269-4cdd-b1cd-1fb20d1e1ee9",
+        "model": "unknown"
+      },
+      "human_author": "gagandeepahuja09 <gagandeepahuja09@gmail.com>"
+    }
+  }
+}
