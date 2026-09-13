@@ -166,6 +166,7 @@ func (db *DB) SelectFromTable(selectFromTableInput sqlparser.SelectFromTable) ([
 	if err != nil {
 		return nil, err
 	}
+	fmt.Println("HELLO1111")
 	res, err := txn.SelectFromTable(selectFromTableInput)
 	if err != nil {
 		txn.Rollback()
@@ -244,9 +245,8 @@ func (db *DB) deserializeRowValues(tableName, value string) ([]string, error) {
 
 func (db *DB) fullTableScan(tableName string, readTxnId uint64, activeTxnMap map[uint64]struct{}) ([][]string, error) {
 	key := fmt.Sprintf("%s:", tableName)
-	// need to pass readTxnId and activeTxnMap in both
 	memTableMap := db.memTable.PrefixScan(key, readTxnId, activeTxnMap)
-	ssTableMap, err := db.ssTable.PrefixScan(key)
+	ssTableMap, err := db.ssTable.PrefixScan(key, readTxnId, activeTxnMap)
 	if err != nil {
 		return nil, err
 	}
@@ -277,7 +277,7 @@ func (db *DB) fullTableScan(tableName string, readTxnId uint64, activeTxnMap map
 // returns an array of primary key IDs which satisfy the index.
 func (db *DB) secondaryIndexPrefixScan(prefixKey string, readTxnId uint64, activeTxnMap map[uint64]struct{}) ([]string, error) {
 	memTableMap := db.memTable.PrefixScan(prefixKey, readTxnId, activeTxnMap)
-	ssTableMap, err := db.ssTable.PrefixScan(prefixKey)
+	ssTableMap, err := db.ssTable.PrefixScan(prefixKey, readTxnId, activeTxnMap)
 	if err != nil {
 		return nil, err
 	}

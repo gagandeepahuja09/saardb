@@ -130,7 +130,7 @@ func commitAndFlush(t *testing.T, txn *db.Transaction, dbInstance *db.DB) {
 	assert.NoError(t, err)
 }
 
-func TestSsTableGetPicksLatestTxnIdWithoutCompaction(t *testing.T) {
+func TestSsTableGetPicksLatestVisibleTxnIdWithoutCompaction(t *testing.T) {
 	defer dbDirCleanUp(t)
 
 	db, err := db.NewDB(testDbConfig)
@@ -163,7 +163,7 @@ func TestSsTableGetPicksLatestTxnIdWithoutCompaction(t *testing.T) {
 	commitAndFlush(t, txn1, db)
 
 	// start txn3, then start txn4
-	// do some updates in txn3 and commit and then read txn4. txn4 should not get committed value of txn3 as txn3 was active when txn3 started
+	// do some updates in txn3 and commit and then read txn4. txn4 should not get committed value of txn3 as txn3 was active when txn4 started
 	// but txn4 should get committed value of txn2 as it started after txn2 commit and hence not part of its
 	// active transactions snapshot.
 	txn3, err := db.Begin()
@@ -240,7 +240,7 @@ func TestSsTablePrefixScanPicksLatestTxnIdWithCompaction(t *testing.T) {
 	assertAgeValuesFromDbSelect(t, db, expectedIdsPerAge)
 }
 
-func TestSsTablePrefixScanPicksLatestTxnIdWithoutCompaction(t *testing.T) {
+func TestSsTablePrefixScanPicksLatestVisibleTxnIdWithoutCompaction(t *testing.T) {
 	defer dbDirCleanUp(t)
 
 	db, err := db.NewDB(testDbConfig)
@@ -249,6 +249,63 @@ func TestSsTablePrefixScanPicksLatestTxnIdWithoutCompaction(t *testing.T) {
 
 	expectedIdsPerAge := getExpectedIdsPerAge(10)
 	assertAgeValuesFromDbSelect(t, db, expectedIdsPerAge)
+
+	for i := 11; i <= 14; i++ {
+		db.InsertIntoTable(fmt.Sprintf("INSERT INTO students VALUES (%d, id%d, 1)", i, i))
+	}
+
+	// start txn1, start txn2, update some rows via db.InsertIntoTable which started a txn after txn1 and txn2.
+	// txn1 read should still not see committed values of db.InsertIntoTable as that txn was started later
+	txn1, err := db.Begin()
+	txn2, err := db.Begin()
+
+	db.InsertIntoTable("INSERT INTO students VALUES (15, id12, 1)")
+	err = db.FlushMemtable()
+	assert.NoError(t, err)
+	// flush to sstable
+
+	selectAgeQuery := sqlparser.SelectFromTable{
+		TableName:       "students",
+		ColumnsRequired: []string{"*"},
+		QueryConditions: []sqlparser.QueryCondition{
+			{
+				ColumnName: "age",
+				QueryType:  sqlparser.QueryType(sqlparser.Gte),
+				Value:      "11",
+			},
+			{
+				ColumnName: "age",
+				QueryType:  sqlparser.QueryType(sqlparser.Lte),
+				Value:      "14",
+			},
+		},
+	}
+
+	// select 11 to 14 should return same set of rows as when t1 started
+	res, err := txn1.SelectFromTable(selectAgeQuery)
+	assert.NoError(t, err)
+	fmt.Printf("res111: %v\n", res)
+
+	// need to insert serialised value for a row
+	txn1.Put("students:id13", "")
+	commitAndFlush(t, txn1, db)
+
+	// res, err = txn1.SelectFromTable(selectAgeQuery)
+	// assert.NoError(t, err)
+	// fmt.Printf("res222: %v\n", res)
+
+	res, err = txn2.SelectFromTable(selectAgeQuery)
+	assert.NoError(t, err)
+	fmt.Printf("res333: %v\n", res)
+
+	// txn2 should return the same set of rows
+
+	// now start txn3. it should have all updates from the latest committed one.
+
+	// start txn3, then start txn4
+	// do some updates in txn3 and commit and then read txn4. txn4 should not get committed value of txn3 as txn3 was active when txn4 started
+	// but txn4 should get committed value of txn2 as it started after txn2 commit and hence not part of its
+	// active transactions snapshot.
 }
 
 func TestSsTablePrefixScanPicksLatestTxnIdWithCompactionAndAfterApplicationRestart(t *testing.T) {

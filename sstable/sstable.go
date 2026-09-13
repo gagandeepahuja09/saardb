@@ -353,7 +353,7 @@ func (st *SsTable) Get(key string, txnId uint64, activeTxnMap map[uint64]struct{
 
 // given the prefix key, PrefixScan returns the serialised key
 // and value in a map for all keys which match that prefix in the sstable.
-func (st *SsTable) PrefixScan(prefixKey string) (map[string]valueTxnId, error) {
+func (st *SsTable) PrefixScan(prefixKey string, readTxnId uint64, activeTxnMap map[uint64]struct{}) (map[string]valueTxnId, error) {
 	st.mutex.RLock()
 	defer st.mutex.RUnlock()
 	tableMap := map[string]valueTxnId{}
@@ -376,7 +376,7 @@ func (st *SsTable) PrefixScan(prefixKey string) (map[string]valueTxnId, error) {
 
 		var err error
 		tableMap, err = st.sequentiallyScanTableAndUpdateMap(file, prefixKey,
-			ssTableIndex[lowerBoundSliceIndex].offset, endOffset, tableMap)
+			ssTableIndex[lowerBoundSliceIndex].offset, endOffset, tableMap, readTxnId, activeTxnMap)
 		if err != nil {
 			return nil, err
 		}
@@ -397,7 +397,8 @@ func extractValueFromSsTable(ssTableDataBlockBuf []byte, i int) (string, error) 
 }
 
 func (st *SsTable) sequentiallyScanTableAndUpdateMap(ssTableFile *os.File, tableKey string,
-	dataBlockStartOffset, fileEndOffset int, tableMap map[string]valueTxnId) (map[string]valueTxnId, error) {
+	dataBlockStartOffset, fileEndOffset int, tableMap map[string]valueTxnId,
+	readTxnId uint64, activeTxnMap map[uint64]struct{}) (map[string]valueTxnId, error) {
 	ssTableDataBlockBuf := make([]byte, fileEndOffset-dataBlockStartOffset)
 	_, err := ssTableFile.ReadAt(ssTableDataBlockBuf, int64(dataBlockStartOffset))
 	if err != nil && err != io.EOF {
@@ -421,10 +422,15 @@ func (st *SsTable) sequentiallyScanTableAndUpdateMap(ssTableFile *os.File, table
 		i += (4 + len(value))
 
 		if strings.HasPrefix(key, tableKey) {
-			// only set the key value pair if the key is not found
-			// this is because we are sequentially going through the newest file first
-			if currValueTxnId, ok := (tableMap[key]); !ok || currValueTxnId.txnId < txnId {
+			_, isTxnActive := activeTxnMap[txnId]
+			currValueTxnId, ok := (tableMap[key])
+			// largest possible value which is either readTxnId or less than it and
+			// non-active
+			if (!ok || currValueTxnId.txnId < txnId) &&
+				(txnId == readTxnId || (txnId < readTxnId && !isTxnActive)) {
 				tableMap[key] = valueTxnId{value: value, txnId: txnId}
+
+				fmt.Printf("tableMap[key]333: %+v\n", tableMap[key])
 			}
 		} else {
 			keyPrefix := key[0:min(len(tableKey), len(key))]
