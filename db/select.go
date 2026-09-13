@@ -166,7 +166,6 @@ func (db *DB) SelectFromTable(selectFromTableInput sqlparser.SelectFromTable) ([
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("HELLO1111")
 	res, err := txn.SelectFromTable(selectFromTableInput)
 	if err != nil {
 		txn.Rollback()

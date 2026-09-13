@@ -254,15 +254,32 @@ func TestSsTablePrefixScanPicksLatestVisibleTxnIdWithoutCompaction(t *testing.T)
 		db.InsertIntoTable(fmt.Sprintf("INSERT INTO students VALUES (%d, id%d, 1)", i, i))
 	}
 
+	initialExpectedRes := [][]string{
+		{"11", "id11", "1"},
+		{"12", "id12", "1"},
+		{"13", "id13", "1"},
+		{"14", "id14", "1"},
+	}
+
+	expectedResPostUpdates := [][]string{
+		{"11", "id11", "1"},
+		{"12", "id13", "1"},
+		{"14", "id12", "1"},
+		{"14", "id14", "1"},
+	}
+
 	// start txn1, start txn2, update some rows via db.InsertIntoTable which started a txn after txn1 and txn2.
-	// txn1 read should still not see committed values of db.InsertIntoTable as that txn was started later
+	// txn1 read should still not see committed values of db.InsertIntoTable as that txn was started later.
+	// carry out another update via txn1
+	// start txn3, this should see all the updates including last 2.
+	// txn2 read should not see any of the latest 2 updates: 1 started later and other was active when it
+	// started.
 	txn1, err := db.Begin()
 	txn2, err := db.Begin()
 
-	db.InsertIntoTable("INSERT INTO students VALUES (15, id12, 1)")
+	db.InsertIntoTable("INSERT INTO students VALUES (14, id12, 1)")
 	err = db.FlushMemtable()
 	assert.NoError(t, err)
-	// flush to sstable
 
 	selectAgeQuery := sqlparser.SelectFromTable{
 		TableName:       "students",
@@ -281,31 +298,23 @@ func TestSsTablePrefixScanPicksLatestVisibleTxnIdWithoutCompaction(t *testing.T)
 		},
 	}
 
-	// select 11 to 14 should return same set of rows as when t1 started
 	res, err := txn1.SelectFromTable(selectAgeQuery)
 	assert.NoError(t, err)
-	fmt.Printf("res111: %v\n", res)
+	assert.ElementsMatch(t, initialExpectedRes, res)
 
-	// need to insert serialised value for a row
-	txn1.Put("students:id13", "")
+	txn1.InsertIntoTable(sqlparser.InsertIntoTable{
+		TableName:    "students",
+		ColumnValues: []string{"12", "id13", "1"},
+	})
+
+	txn3, err := db.Begin()
+	res, err = txn3.SelectFromTable(selectAgeQuery)
+	assert.ElementsMatch(t, expectedResPostUpdates, res)
 	commitAndFlush(t, txn1, db)
-
-	// res, err = txn1.SelectFromTable(selectAgeQuery)
-	// assert.NoError(t, err)
-	// fmt.Printf("res222: %v\n", res)
 
 	res, err = txn2.SelectFromTable(selectAgeQuery)
 	assert.NoError(t, err)
-	fmt.Printf("res333: %v\n", res)
-
-	// txn2 should return the same set of rows
-
-	// now start txn3. it should have all updates from the latest committed one.
-
-	// start txn3, then start txn4
-	// do some updates in txn3 and commit and then read txn4. txn4 should not get committed value of txn3 as txn3 was active when txn4 started
-	// but txn4 should get committed value of txn2 as it started after txn2 commit and hence not part of its
-	// active transactions snapshot.
+	assert.ElementsMatch(t, initialExpectedRes, res)
 }
 
 func TestSsTablePrefixScanPicksLatestTxnIdWithCompactionAndAfterApplicationRestart(t *testing.T) {

@@ -429,8 +429,6 @@ func (st *SsTable) sequentiallyScanTableAndUpdateMap(ssTableFile *os.File, table
 			if (!ok || currValueTxnId.txnId < txnId) &&
 				(txnId == readTxnId || (txnId < readTxnId && !isTxnActive)) {
 				tableMap[key] = valueTxnId{value: value, txnId: txnId}
-
-				fmt.Printf("tableMap[key]333: %+v\n", tableMap[key])
 			}
 		} else {
 			keyPrefix := key[0:min(len(tableKey), len(key))]

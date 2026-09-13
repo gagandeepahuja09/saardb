@@ -367,17 +367,12 @@ func (db *DB) serialiseInsertIntoTableInput(insertIntoTableInput sqlparser.Inser
 	return fmt.Sprintf("%s:%s", tableName, primaryKeyValue), valueSchemaBuf, nil
 }
 
-func (db *DB) insertIntoTable(insertIntoTableInput sqlparser.InsertIntoTable) error {
-	txn, err := db.Begin()
-	if err != nil {
-		return err
-	}
-
-	table := db.tableNameVsSchemaMap[insertIntoTableInput.TableName]
+func (txn *Transaction) InsertIntoTable(insertIntoTableInput sqlparser.InsertIntoTable) error {
+	table := txn.db.tableNameVsSchemaMap[insertIntoTableInput.TableName]
 	if len(insertIntoTableInput.ColumnValues) != len(table.ColumnDetails) {
 		return errors.New("INSERT INTO requires all columns to be present. ")
 	}
-	key, valueSchemaBuf, err := db.serialiseInsertIntoTableInput(insertIntoTableInput)
+	key, valueSchemaBuf, err := txn.db.serialiseInsertIntoTableInput(insertIntoTableInput)
 	if err != nil {
 		return err
 	}
@@ -386,14 +381,22 @@ func (db *DB) insertIntoTable(insertIntoTableInput sqlparser.InsertIntoTable) er
 	}
 
 	// todo: also test for the atomicity in the end-to-end test.
-	err = db.updateSecondaryIndexes(insertIntoTableInput, txn)
+	err = txn.db.updateSecondaryIndexes(insertIntoTableInput, txn)
 	if err != nil {
 		txn.Rollback()
+		return nil
 	}
 
-	txn.Commit()
+	return txn.Commit()
+}
 
-	return nil
+func (db *DB) insertIntoTable(insertIntoTableInput sqlparser.InsertIntoTable) error {
+	txn, err := db.Begin()
+	if err != nil {
+		return err
+	}
+
+	return txn.InsertIntoTable(insertIntoTableInput)
 }
 
 // generic function which can be used for both GET (pkColValue not available as found out after prefix)
