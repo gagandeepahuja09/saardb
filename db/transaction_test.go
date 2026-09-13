@@ -145,6 +145,7 @@ func TestDifferentOpenTransactionPutWithDifferentKeys(t *testing.T) {
 
 // if t1 and t2 are calling put on the same key, t2 (which tried acquiring later)
 // should get an error
+// once t1 commits, t2 should be able to acquire lock
 func TestDifferentOpenTransactionPutWithSameKey(t *testing.T) {
 	dbInstance, cleanupFunc, err := newDBForTest()
 	defer cleanupFunc()
@@ -155,6 +156,7 @@ func TestDifferentOpenTransactionPutWithSameKey(t *testing.T) {
 
 	testKey := "key_101"
 	expectedValue := "value_101"
+	expectedValueForT2 := "value_102"
 
 	err = txn.Put(testKey, expectedValue)
 	assert.Nil(t, err)
@@ -166,8 +168,18 @@ func TestDifferentOpenTransactionPutWithSameKey(t *testing.T) {
 	txn2, err := dbInstance.Begin()
 	assert.Nil(t, err)
 
-	err = txn2.Put(testKey, expectedValue)
+	err = txn2.Put(testKey, expectedValueForT2)
 	assert.Equal(t, "cannot acquire write lock as write lock acquired by transaction '2'", err.Error())
+
+	txn.Commit()
+	err = txn2.Put(testKey, expectedValueForT2)
+	assert.NoError(t, err)
+	err = txn2.Commit()
+	assert.NoError(t, err)
+
+	val, err = txn2.Get(testKey)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedValueForT2, val)
 }
 
 // t1 acquires write lock, t2 will be able to acquire read lock and reads old value

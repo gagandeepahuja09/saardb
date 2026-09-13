@@ -44,6 +44,7 @@ func (txn *Transaction) tryAcquireWriteLock(key string) error {
 	if txn.lockAcquiredKeys == nil {
 		txn.lockAcquiredKeys = []string{}
 	}
+	txn.lockAcquiredKeys = append(txn.lockAcquiredKeys, key)
 	txn.db.transactionManager.keyVsLocksAcquiredMap[key] = locksAcquired
 	return nil
 }
