@@ -326,7 +326,7 @@ func (st *SsTable) buildIndexFromFile(file *os.File) (int, []indexBlockEntry, er
 	return int(indexOffset), ssTableIndex, nil
 }
 
-func (st *SsTable) Get(key string) (string, error) {
+func (st *SsTable) Get(key string, txnId uint64, activeTxnMap map[uint64]struct{}) (string, error) {
 	st.mutex.RLock()
 	defer st.mutex.RUnlock()
 	if st.skipIndex {
@@ -342,7 +342,7 @@ func (st *SsTable) Get(key string) (string, error) {
 		}
 		endOffset := st.indexOffsets[i]
 		value, err := st.getValueFromSsTableDataBlock(file, key,
-			ssTableIndex[lowerBoundSliceIndex].offset, endOffset)
+			ssTableIndex[lowerBoundSliceIndex].offset, endOffset, txnId, activeTxnMap)
 		if value == "" && err == nil {
 			continue
 		}
@@ -353,7 +353,7 @@ func (st *SsTable) Get(key string) (string, error) {
 
 // given the prefix key, PrefixScan returns the serialised key
 // and value in a map for all keys which match that prefix in the sstable.
-func (st *SsTable) PrefixScan(prefixKey string) (map[string]valueTxnId, error) {
+func (st *SsTable) PrefixScan(prefixKey string, readTxnId uint64, activeTxnMap map[uint64]struct{}) (map[string]valueTxnId, error) {
 	st.mutex.RLock()
 	defer st.mutex.RUnlock()
 	tableMap := map[string]valueTxnId{}
@@ -376,7 +376,7 @@ func (st *SsTable) PrefixScan(prefixKey string) (map[string]valueTxnId, error) {
 
 		var err error
 		tableMap, err = st.sequentiallyScanTableAndUpdateMap(file, prefixKey,
-			ssTableIndex[lowerBoundSliceIndex].offset, endOffset, tableMap)
+			ssTableIndex[lowerBoundSliceIndex].offset, endOffset, tableMap, readTxnId, activeTxnMap)
 		if err != nil {
 			return nil, err
 		}
@@ -397,7 +397,8 @@ func extractValueFromSsTable(ssTableDataBlockBuf []byte, i int) (string, error) 
 }
 
 func (st *SsTable) sequentiallyScanTableAndUpdateMap(ssTableFile *os.File, tableKey string,
-	dataBlockStartOffset, fileEndOffset int, tableMap map[string]valueTxnId) (map[string]valueTxnId, error) {
+	dataBlockStartOffset, fileEndOffset int, tableMap map[string]valueTxnId,
+	readTxnId uint64, activeTxnMap map[uint64]struct{}) (map[string]valueTxnId, error) {
 	ssTableDataBlockBuf := make([]byte, fileEndOffset-dataBlockStartOffset)
 	_, err := ssTableFile.ReadAt(ssTableDataBlockBuf, int64(dataBlockStartOffset))
 	if err != nil && err != io.EOF {
@@ -421,9 +422,12 @@ func (st *SsTable) sequentiallyScanTableAndUpdateMap(ssTableFile *os.File, table
 		i += (4 + len(value))
 
 		if strings.HasPrefix(key, tableKey) {
-			// only set the key value pair if the key is not found
-			// this is because we are sequentially going through the newest file first
-			if currValueTxnId, ok := (tableMap[key]); !ok || currValueTxnId.txnId < txnId {
+			_, isTxnActive := activeTxnMap[txnId]
+			currValueTxnId, ok := (tableMap[key])
+			// largest possible value which is either readTxnId or less than it and
+			// non-active
+			if (!ok || currValueTxnId.txnId < txnId) &&
+				(txnId == readTxnId || (txnId < readTxnId && !isTxnActive)) {
 				tableMap[key] = valueTxnId{value: value, txnId: txnId}
 			}
 		} else {
@@ -436,14 +440,15 @@ func (st *SsTable) sequentiallyScanTableAndUpdateMap(ssTableFile *os.File, table
 	return tableMap, nil
 }
 
-func (st *SsTable) getValueFromSsTableDataBlock(ssTableFile *os.File, key string, dataBlockStartOffset, dataBlockEndOffset int) (string, error) {
+func (st *SsTable) getValueFromSsTableDataBlock(ssTableFile *os.File, key string,
+	dataBlockStartOffset, dataBlockEndOffset int, readTxnId uint64, activeTxnMap map[uint64]struct{}) (
+	string, error) {
 	ssTableDataBlockBuf := make([]byte, dataBlockEndOffset-dataBlockStartOffset)
 	_, err := ssTableFile.ReadAt(ssTableDataBlockBuf, int64(dataBlockStartOffset))
 	if err != nil && err != io.EOF {
 		return "", err
 	}
 	maxTxnIdValue := ""
-	var maxTxnId uint64 = 0
 	for i := 0; i < len(ssTableDataBlockBuf); {
 		if i+8 > len(ssTableDataBlockBuf) {
 			return "", errors.New("unexpected error while reading txnId")
@@ -460,13 +465,17 @@ func (st *SsTable) getValueFromSsTableDataBlock(ssTableFile *os.File, key string
 			return "", err
 		}
 		i += (4 + len(currentValue))
-		if currentKey == key && txnId > uint64(maxTxnId) {
-			maxTxnId = txnId
+		_, isTxnActive := activeTxnMap[txnId]
+		// within a file, sstable is sorted as per memtable order: smallest key first.
+		// hence, the last key to satisfy this condition would have the latest value
+		if currentKey == key && ((txnId == readTxnId) || txnId < readTxnId && !isTxnActive) {
 			maxTxnIdValue = currentValue
 		} else if currentKey > key {
 			break
 		}
 	}
+	// latest txnId would always be found in the latest file. hence if the key is found
+	// + txnId conditions are satisfied, we can return and don't need to check in older files.
 	return maxTxnIdValue, nil
 }
 

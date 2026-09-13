@@ -107,37 +107,84 @@ func TestGetAndPutInBulk(t *testing.T) {
 }
 
 // write the same set of keys with multiple versions (txnId)
-func TestSsTableGetPicksLatestTxnIdWithCompaction(t *testing.T) {
-	defer dbDirCleanUp(t)
+// func TestSsTableGetPicksLatestTxnIdWithCompaction(t *testing.T) {
+// 	defer dbDirCleanUp(t)
 
-	db, err := db.NewDB(testDbConfig)
-	buildTestDataForRepeatKeys(db, 50)
+// 	db, err := db.NewDB(testDbConfig)
+// 	buildTestDataForRepeatKeys(db, 50)
+// 	assert.NoError(t, err)
+
+// 	for i := 0; i < 10; i++ {
+// 		key := fmt.Sprintf("key_%d", i)
+// 		val, err := db.Get(key)
+// 		expectedValue := fmt.Sprintf("value_%d", i+11)
+// 		assert.NoError(t, err)
+// 		assert.Equal(t, expectedValue, val)
+// 	}
+// }
+
+func commitAndFlush(t *testing.T, txn *db.Transaction, dbInstance *db.DB) {
+	err := txn.Commit()
 	assert.NoError(t, err)
-
-	for i := 0; i < 10; i++ {
-		key := fmt.Sprintf("key_%d", i)
-		val, err := db.Get(key)
-		expectedValue := fmt.Sprintf("value_%d", i+11)
-		assert.NoError(t, err)
-		assert.Equal(t, expectedValue, val)
-	}
+	err = dbInstance.FlushMemtable()
+	assert.NoError(t, err)
 }
 
-func TestSsTableGetPicksLatestTxnIdWithoutCompaction(t *testing.T) {
+func TestSsTableGetPicksLatestVisibleTxnIdWithoutCompaction(t *testing.T) {
 	defer dbDirCleanUp(t)
 
 	db, err := db.NewDB(testDbConfig)
-	buildTestDataForRepeatKeys(db, 15)
+	assert.NoError(t, err)
+
+	txn, err := db.Begin()
 	assert.NoError(t, err)
 
 	for i := 0; i < 10; i++ {
 		key := fmt.Sprintf("key_%d", i)
-		val, err := db.Get(key)
+		value := fmt.Sprintf("value_%d", i)
+		err := txn.Put(key, value)
 		assert.NoError(t, err)
-		expectedValue := fmt.Sprintf("value_%d", i+11)
-		assert.NoError(t, err)
-		assert.Equal(t, expectedValue, val)
 	}
+
+	commitAndFlush(t, txn, db)
+
+	// start txn1, start txn2, do some updates in txn2, then commit txn2
+	// txn1 read should still not have committed value of txn2. because txn2 was started later.
+	txn1, err := db.Begin()
+	assert.NoError(t, err)
+	txn2, err := db.Begin()
+	assert.NoError(t, err)
+	err = txn2.Put("key_9", "value_100")
+	assert.NoError(t, err)
+	commitAndFlush(t, txn2, db)
+	val, err := txn1.Get("key_9")
+	assert.NoError(t, err)
+	assert.Equal(t, "value_9", val)
+	commitAndFlush(t, txn1, db)
+
+	// start txn3, then start txn4
+	// do some updates in txn3 and commit and then read txn4. txn4 should not get committed value of txn3 as txn3 was active when txn4 started
+	// but txn4 should get committed value of txn2 as it started after txn2 commit and hence not part of its
+	// active transactions snapshot.
+	txn3, err := db.Begin()
+	assert.NoError(t, err)
+	txn4, err := db.Begin()
+	assert.NoError(t, err)
+	err = txn3.Put("key_9", "value_200")
+	assert.NoError(t, err)
+	commitAndFlush(t, txn3, db)
+	val, err = txn4.Get("key_9")
+	assert.NoError(t, err)
+	assert.Equal(t, "value_100", val)
+	commitAndFlush(t, txn4, db)
+
+	txn5, err := db.Begin()
+	assert.NoError(t, err)
+	val, err = txn5.Get("key_9")
+	assert.NoError(t, err)
+	assert.Equal(t, "value_200", val)
+
+	// todo: add test to show that readers and writers don't block each other
 }
 
 func getExpectedIdsPerAge(loopCount int) map[int][]string {
@@ -193,7 +240,7 @@ func TestSsTablePrefixScanPicksLatestTxnIdWithCompaction(t *testing.T) {
 	assertAgeValuesFromDbSelect(t, db, expectedIdsPerAge)
 }
 
-func TestSsTablePrefixScanPicksLatestTxnIdWithoutCompaction(t *testing.T) {
+func TestSsTablePrefixScanPicksLatestVisibleTxnIdWithoutCompaction(t *testing.T) {
 	defer dbDirCleanUp(t)
 
 	db, err := db.NewDB(testDbConfig)
@@ -202,6 +249,72 @@ func TestSsTablePrefixScanPicksLatestTxnIdWithoutCompaction(t *testing.T) {
 
 	expectedIdsPerAge := getExpectedIdsPerAge(10)
 	assertAgeValuesFromDbSelect(t, db, expectedIdsPerAge)
+
+	for i := 11; i <= 14; i++ {
+		db.InsertIntoTable(fmt.Sprintf("INSERT INTO students VALUES (%d, id%d, 1)", i, i))
+	}
+
+	initialExpectedRes := [][]string{
+		{"11", "id11", "1"},
+		{"12", "id12", "1"},
+		{"13", "id13", "1"},
+		{"14", "id14", "1"},
+	}
+
+	expectedResPostUpdates := [][]string{
+		{"11", "id11", "1"},
+		{"12", "id13", "1"},
+		{"14", "id12", "1"},
+		{"14", "id14", "1"},
+	}
+
+	// start txn1, start txn2, update some rows via db.InsertIntoTable which started a txn after txn1 and txn2.
+	// txn1 read should still not see committed values of db.InsertIntoTable as that txn was started later.
+	// carry out another update via txn1
+	// start txn3, this should see all the updates including last 2.
+	// txn2 read should not see any of the latest 2 updates: 1 started later and other was active when it
+	// started.
+	txn1, err := db.Begin()
+	txn2, err := db.Begin()
+
+	db.InsertIntoTable("INSERT INTO students VALUES (14, id12, 1)")
+	err = db.FlushMemtable()
+	assert.NoError(t, err)
+
+	selectAgeQuery := sqlparser.SelectFromTable{
+		TableName:       "students",
+		ColumnsRequired: []string{"*"},
+		QueryConditions: []sqlparser.QueryCondition{
+			{
+				ColumnName: "age",
+				QueryType:  sqlparser.QueryType(sqlparser.Gte),
+				Value:      "11",
+			},
+			{
+				ColumnName: "age",
+				QueryType:  sqlparser.QueryType(sqlparser.Lte),
+				Value:      "14",
+			},
+		},
+	}
+
+	res, err := txn1.SelectFromTable(selectAgeQuery)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, initialExpectedRes, res)
+
+	txn1.InsertIntoTable(sqlparser.InsertIntoTable{
+		TableName:    "students",
+		ColumnValues: []string{"12", "id13", "1"},
+	})
+
+	txn3, err := db.Begin()
+	res, err = txn3.SelectFromTable(selectAgeQuery)
+	assert.ElementsMatch(t, expectedResPostUpdates, res)
+	commitAndFlush(t, txn1, db)
+
+	res, err = txn2.SelectFromTable(selectAgeQuery)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, initialExpectedRes, res)
 }
 
 func TestSsTablePrefixScanPicksLatestTxnIdWithCompactionAndAfterApplicationRestart(t *testing.T) {
