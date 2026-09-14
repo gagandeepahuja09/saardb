@@ -109,7 +109,9 @@ func (txn *Transaction) cleanupBufferedWriteMap() {
 func (txn *Transaction) Rollback() {
 	txn.releaseAllLocks()
 	txn.cleanupBufferedWriteMap()
+	txn.db.transactionManager.mu.Lock()
 	delete(txn.db.transactionManager.activeTransactionsMap, txn.id)
+	txn.db.transactionManager.mu.Unlock()
 }
 
 // payload structure:
@@ -185,7 +187,9 @@ func (txn *Transaction) Commit() error {
 	txn.releaseAllLocks()
 	txn.cleanupBufferedWriteMap()
 
+	txn.db.transactionManager.mu.Lock()
 	delete(txn.db.transactionManager.activeTransactionsMap, txn.id)
+	txn.db.transactionManager.mu.Unlock()
 
 	return nil
 }
