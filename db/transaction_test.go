@@ -50,7 +50,7 @@ func TestSameTransactionPutAndGet(t *testing.T) {
 	assert.Equal(t, expectedValue, val)
 }
 
-// t1 acquires read lock first. t1 upgrades to write lock. t2 will still able to acquire read lock.
+// t1 acquires read lock first. t1 upgrades to write lock. t2 will still be able to acquire read lock.
 func TestDifferentTransactionPutAndGetWithPutAcquiringLock(t *testing.T) {
 	dbInstance, cleanupFunc, err := newDBForTest()
 	defer cleanupFunc()
