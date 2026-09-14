@@ -1,0 +1,24 @@
+db/db.go
+  h_67b5b423f5fb35 9,34,73,193-203
+db/transaction.go
+  h_67b5b423f5fb35 112,114,190,192
+docs/mvcc_compaction_intuition.md
+  h_67b5b423f5fb35 1-177
+docs/pr_descriptions/25.md
+  h_67b5b423f5fb35 1-60
+sstable/compaction.go
+  h_67b5b423f5fb35 17-22,37-41,43,72-77,79-81,85-90,93,111-112,121,126-127
+sstable/utils.go
+  h_67b5b423f5fb35 14-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "49f29296ee81822d9e837e0f72bb8437650daa3a",
+  "prompts": {},
+  "humans": {
+    "h_67b5b423f5fb35": {
+      "author": "gagandeepahuja09 <gagandeepahuja09@gmail.com>"
+    }
+  }
+}
