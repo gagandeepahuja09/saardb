@@ -14,8 +14,6 @@ import (
 )
 
 var testDbConfig = db.Config{
-	// todo: walConfig. will be better to have a single folder like: temp -> wal.log and sstable_datafiles
-	// directory
 	SsTableConfig: sstable.Config{
 		DataFilesDirectory: "temp",
 	},
@@ -183,8 +181,6 @@ func TestSsTableGetPicksLatestVisibleTxnIdWithoutCompaction(t *testing.T) {
 	val, err = txn5.Get("key_9")
 	assert.NoError(t, err)
 	assert.Equal(t, "value_200", val)
-
-	// todo: add test to show that readers and writers don't block each other
 }
 
 func getExpectedIdsPerAge(loopCount int) map[int][]string {
@@ -253,6 +249,7 @@ func TestSsTablePrefixScanPicksLatestVisibleTxnIdWithoutCompaction(t *testing.T)
 	for i := 11; i <= 14; i++ {
 		db.InsertIntoTable(fmt.Sprintf("INSERT INTO students VALUES (%d, id%d, 1)", i, i))
 	}
+	db.FlushMemtable()
 
 	initialExpectedRes := [][]string{
 		{"11", "id11", "1"},

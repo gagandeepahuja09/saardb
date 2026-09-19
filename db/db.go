@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,7 +31,7 @@ type LocksAcquired struct {
 }
 type transactionManager struct {
 	nextTransactionId     uint64
-	mu                    sync.Mutex
+	mu                    sync.RWMutex
 	keyVsLocksAcquiredMap map[string]*LocksAcquired
 	activeTransactionsMap map[uint64]struct{}
 }
@@ -69,7 +70,7 @@ func NewDB(config Config) (*DB, error) {
 
 	db.transactionManager = transactionManager{
 		nextTransactionId:     maxTxnId + 1,
-		mu:                    sync.Mutex{},
+		mu:                    sync.RWMutex{},
 		keyVsLocksAcquiredMap: map[string]*LocksAcquired{},
 		activeTransactionsMap: map[uint64]struct{}{},
 	}
@@ -189,7 +190,17 @@ func (db *DB) flushMemtableToSsTable() error {
 
 	err = db.ssTable.Write(ssTableFile, db.memTable.Iterate)
 	if db.ssTable.ShouldRunCompaction() {
-		go db.ssTable.RunCompaction()
+
+		db.transactionManager.mu.RLock()
+		var minActiveTxnId uint64 = math.MaxUint64
+		for key, _ := range db.transactionManager.activeTransactionsMap {
+			if key < minActiveTxnId {
+				minActiveTxnId = key
+			}
+		}
+		db.transactionManager.mu.RUnlock()
+
+		go db.ssTable.RunCompaction(minActiveTxnId)
 	}
 	return err
 }
