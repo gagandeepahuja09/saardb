@@ -121,7 +121,7 @@ func (st *SsTable) RunCompaction(minActiveTxnId uint64) {
 	sortedEntries := sortedSsTableEntries(compactedSsTableEntries)
 
 	// 4. create iterator function which calls the callback for each key-value-transactionId combination
-	//  in sorted and compacted map
+	// in sorted and compacted map
 	iterator := func(fn func(key, value string, txnId uint64)) {
 		for _, sortedEntry := range sortedEntries {
 			fn(sortedEntry.key, sortedEntry.value, sortedEntry.txnId)

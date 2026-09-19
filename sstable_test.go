@@ -14,8 +14,6 @@ import (
 )
 
 var testDbConfig = db.Config{
-	// todo: walConfig. will be better to have a single folder like: temp -> wal.log and sstable_datafiles
-	// directory
 	SsTableConfig: sstable.Config{
 		DataFilesDirectory: "temp",
 	},
