@@ -12,7 +12,7 @@ type manifest struct {
 	// possible that 5.json has older data compared to 4.json
 	// FileNames will always have the oldest file first
 	FileNames []string `json:"file_names"`
-	// todo: MaxTxnId  uint64
+	MaxTxnId  uint64
 }
 
 func (st *SsTable) getManifest() (*manifest, error) {
@@ -31,8 +31,6 @@ func (st *SsTable) getManifest() (*manifest, error) {
 	if err != nil {
 		return nil, err
 	}
-	// todo: when we start writing txnId to sstable, we also need to persist maxTxnId in manifest file.
-	// and utilise that during application bootup to identify the maxTxnId.
 
 	var manifest manifest
 	err = json.Unmarshal(manifestBuf, &manifest)
