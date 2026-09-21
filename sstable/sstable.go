@@ -35,7 +35,6 @@ type SsTable struct {
 	blockLength        int
 	indexBlocks        [][]indexBlockEntry // stores the index block array for each file.
 	manifest           manifest
-	skipIndex          bool // added only for benchmarking. Default is that index will always be used
 	compacting         bool
 }
 
@@ -55,7 +54,6 @@ func NewSsTable(config Config) (*SsTable, error) {
 	st := SsTable{
 		dataFilesDirectory: config.DataFilesDirectory,
 		blockLength:        config.BlockLength,
-		skipIndex:          config.SkipIndex,
 		firstLevelFiles:    make([]*os.File, 0),
 		indexBlocks:        make([][]indexBlockEntry, 0),
 		mutex:              sync.RWMutex{},
@@ -69,9 +67,6 @@ func NewSsTable(config Config) (*SsTable, error) {
 	st.firstLevelFiles = directoryMetadata.firstLevelFiles
 	st.manifest = directoryMetadata.manifest
 
-	if st.skipIndex {
-		return &st, err
-	}
 	indexOffsets, indexBlocks, err := st.buildIndexes(st.firstLevelFiles)
 	st.indexBlocks = indexBlocks
 	st.indexOffsets = indexOffsets
@@ -97,6 +92,7 @@ func (st *SsTable) NewFile() (*os.File, error) {
 // example: 1. MemTable OR 2. firstLevelFiles which need to be merged and compacted.
 // It also updates the internal structs for firstLevelFiles, indexBlocks, manifest files and indexOffsets
 func (st *SsTable) Write(file *os.File, iteratorFunc func(fn func(key, value string, txnId uint64))) error {
+	// return maxTxnId also here?
 	indexOffset, indexBlock, err := st.writeToFile(file, iteratorFunc)
 	if err != nil {
 		return err
@@ -104,9 +100,7 @@ func (st *SsTable) Write(file *os.File, iteratorFunc func(fn func(key, value str
 
 	st.mutex.Lock()
 	st.firstLevelFiles = append(st.firstLevelFiles, file)
-	if !st.skipIndex {
-		st.indexBlocks = append(st.indexBlocks, indexBlock)
-	}
+	st.indexBlocks = append(st.indexBlocks, indexBlock)
 	st.manifest.FileNames = append(st.manifest.FileNames, file.Name())
 	st.indexOffsets = append(st.indexOffsets, indexOffset)
 
@@ -126,13 +120,11 @@ func (st *SsTable) writeToFile(file *os.File, iteratorFunc func(fn func(key, val
 	if err != nil {
 		return 0, nil, err
 	}
-	if !st.skipIndex {
-		if err = st.writeIndexBlock(file, indexBlock); err != nil {
-			return 0, nil, err
-		}
-		if err = st.writeFooter(file, indexOffset); err != nil {
-			return 0, nil, err
-		}
+	if err = st.writeIndexBlock(file, indexBlock); err != nil {
+		return 0, nil, err
+	}
+	if err = st.writeFooter(file, indexOffset); err != nil {
+		return 0, nil, err
 	}
 	return indexOffset, indexBlock, err
 }
@@ -160,9 +152,13 @@ func (st *SsTable) writeDataBlocks(file *os.File, iteratorFunc func(fn func(key,
 
 	var err error
 
+	var maxTxnId uint64 = 0
 	iteratorFunc(func(key, value string, txnId uint64) {
 		if blockFirstKey == "" {
 			blockFirstKey = key
+		}
+		if txnId > maxTxnId {
+			maxTxnId = txnId
 		}
 		// write byte array
 		// [64_bit_txnId][length_of_key][key][length_of_value][value]
@@ -207,7 +203,16 @@ func (st *SsTable) writeDataBlocks(file *os.File, iteratorFunc func(fn func(key,
 		})
 		_, err = file.Write(ssTableBlockBuf)
 	}
+
+	st.mutex.Lock()
+	st.manifest.MaxTxnId = maxTxnId
+	st.mutex.Unlock()
+
 	return offset, indexBlock, err
+}
+
+func (st *SsTable) GetMaxTxnId() uint64 {
+	return st.manifest.MaxTxnId
 }
 
 func (st *SsTable) writeIndexBlock(file *os.File, indexBlock []indexBlockEntry) error {
@@ -329,9 +334,6 @@ func (st *SsTable) buildIndexFromFile(file *os.File) (int, []indexBlockEntry, er
 func (st *SsTable) Get(key string, txnId uint64, activeTxnMap map[uint64]struct{}) (string, error) {
 	st.mutex.RLock()
 	defer st.mutex.RUnlock()
-	if st.skipIndex {
-		return st.linearSearch(key)
-	}
 	// newest file to oldest file
 	for i := len(st.firstLevelFiles) - 1; i >= 0; i-- {
 		file := st.firstLevelFiles[i]
@@ -493,33 +495,4 @@ func getLowerBound(key string, index []indexBlockEntry) int {
 		}
 	}
 	return lowerBoundSliceIndex
-}
-
-func (st *SsTable) linearSearch(key string) (string, error) {
-	for i := len(st.firstLevelFiles) - 1; i >= 0; i-- {
-		file := st.firstLevelFiles[i]
-		value, err := st.linearSearchFile(file, key)
-		if err != nil || value != "" {
-			return value, err
-		}
-	}
-	return "", nil
-}
-
-func (st *SsTable) linearSearchFile(file *os.File, key string) (string, error) {
-	stat, _ := file.Stat()
-	fileSize := stat.Size()
-	buf := make([]byte, fileSize)
-	_, err := file.Read(buf)
-	if err != nil && err != io.EOF {
-		return "", err
-	}
-	entries := strings.Split(string(buf), "\n")
-	for _, payload := range entries {
-		cmds := strings.Split(payload, " ")
-		if cmds[1] == key {
-			return cmds[2], nil
-		}
-	}
-	return "", nil
 }

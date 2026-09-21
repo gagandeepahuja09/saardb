@@ -325,4 +325,6 @@ func TestSsTablePrefixScanPicksLatestTxnIdWithCompactionAndAfterApplicationResta
 
 	dbAfterRestart, err := db.NewDB(testDbConfig)
 	assertAgeValuesFromDbSelect(t, dbAfterRestart, expectedIdsPerAge)
+
+	// additional DB writes here
 }

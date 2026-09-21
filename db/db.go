@@ -58,7 +58,7 @@ func NewDB(config Config) (*DB, error) {
 	}
 	db.wal = wal
 
-	memTable, maxTxnId, err := db.buildMemtableFromWal()
+	memTable, walMaxTxnId, err := db.buildMemtableFromWal()
 	if err != nil {
 		return nil, err
 	}
@@ -66,6 +66,12 @@ func NewDB(config Config) (*DB, error) {
 	db.ssTable, err = sstable.NewSsTable(config.SsTableConfig)
 	if err != nil {
 		return nil, err
+	}
+
+	sstableMaxTxnId := db.ssTable.GetMaxTxnId()
+	maxTxnId := sstableMaxTxnId
+	if walMaxTxnId > sstableMaxTxnId {
+		maxTxnId = walMaxTxnId
 	}
 
 	db.transactionManager = transactionManager{
@@ -141,7 +147,9 @@ func (db *DB) Get(key string) (value string, err error) {
 	if err != nil {
 		return "", err
 	}
-	return txn.Get(key)
+	res, err := txn.Get(key)
+	txn.Commit()
+	return res, err
 }
 
 func (db *DB) getWithSnapshot(key string, txnId uint64, activeTxnMap map[uint64]struct{}) (value string, err error) {
