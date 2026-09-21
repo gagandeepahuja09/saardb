@@ -1,36 +1,57 @@
-                Dirty  Dirty  Lost   Non-Rep  Phantom  Write
-                    Write  Read   Update Read     Read     Skew                                                            
-READ UNCOMMITTED     ✓      ✗      ✗      ✗        ✗        ✗
-READ COMMITTED       ✓      ✓      ✗      ✗        ✗        ✗                                                              
-REPEATABLE READ      ✓      ✓      ✓      ✓        ✗*       ✗                                                            
-SERIALIZABLE         ✓      ✓      ✓      ✓        ✓        ✓ 
+Isolation is an important property in relational databases to ensure that multiple users and applications can read and write data at the same time without interfering with each other. In blog 4, we discussed isolation and implemented SERIALIZABLE isolation. The problem is that this isolation level has very low adoption due to performance constraints under concurrent workloads.
 
-In blog 4 we discussed and implemented SERIALIZABLE isolation. The problem is that this isolation level has very low adoption due to performance constraints. 
+Most production systems use isolation levels like REPEATABLE READ and READ COMMITTED by default. Postgres uses READ COMMITTED as the default isolation level while MySQL uses REPEATABLE READ.
 
-Most production systems use isolation levels like REPEATABLE READ and READ COMMITTED by default. Postgres uses READ COMMITTED as the default isolation level while MySQL uses REPEATABLE READ. 
+We will start this blog with why SERIALIZABLE isolation has low adoption and low performance and why REPEATABLE READ and READ COMMITTED are default isolation levels of most production databases.
 
-In the current blog, we will take a dig at implementing both READ COMMITTED and REPEATABLE READ isolation levels and in the process also explore MVCC. 
+In the next set of blogs, we will take a dig at implementing both READ COMMITTED and REPEATABLE READ isolation levels and in the process also explore MVCC. 
 
-## Why 2PL has low adoption?
-2PL is a major performance bottleneck due to the fact that readers block writers and writers block readers. Most production user-facing systems are read-heavy in nature. In read-heavy applications, if we are able to ensure that readers and writers are not blocked on each other and only two writers are blocked on each other, we can gain major performance improvements. Let's take an example to solidify what we are saying. If 90% of the database traffic is going to be read traffic, then with 2PL, read transactions would be blocked on some write transaction most of the time. On the other hand, if read transactions don't require a read lock, 90% of our traffic is unaffected by the performance bottleneck due to locks.
+## Why Is Serializable Isolation Via 2PL Rarely Used?
+2PL has a major performance bottleneck due to the fact that readers block writers and writers block readers. Most production user-facing systems are read-heavy in nature. If 90% of the database traffic is going to be read traffic, then with 2PL, read transactions would be blocked on some write transaction most of the time. On the other hand, if read transactions don't get blocked on write transactions, 90% of our traffic is unaffected by the performance bottleneck due to locks.
 
 While write-write conflicts are non-avoidable in nature, read-write conflicts can be avoided.
 
 ## Write Locks
-Write locks are non-negotiable for any application be it with or without databases. The same concept of shared variable in programming applies here. A "key" is a shared variable and if a transaction was updating some key-value pair and another transaction intervened in between and updated the same key, it would lead to inconsistent or unexpected result for the first transaction as the rest of the operations within the transaction and the final result after commit were operating with the assumption that the PUT operation in first transaction was successful with the expected value.
+Write locks are non-negotiable for any application be it with or without databases. The same concept of shared variable in programming applies here. A "key" is a shared variable and if a transaction was updating some key-value pair and another transaction intervened in between and updated the same key, it would lead to inconsistent or unexpected result for the first transaction. Operations within the transaction and the final result after commit were operating with the assumption that the PUT operation in first transaction was successful with the expected value.
 
-Given that write locks are unavoidable, we will try to see if it is possible to remove read locks.
+Given that write locks are unavoidable, we will try to see if it is possible to remove read locks. If we can remove read locks while keeping write locks, we get the performance benefits from the previous section, which is that readers and writers no longer block each other.
+
+## Isolation Levels and Anomalies
+
+|                        | Dirty Read | Dirty Write | Non-Repeatable Read | Lost Update | Phantom Read | Write Skew |
+|------------------------|------------|-------------|---------------------|-------------|--------------|------------|
+| **Read Uncommitted**   | Possible   | Prevented   | Possible            | Possible    | Possible     | Possible   |
+| **Read Committed**     | Prevented  | Prevented   | Possible            | Possible    | Possible     | Possible   |
+| **Repeatable Read**    | Prevented  | Prevented   | Prevented           | Prevented   | Possible     | Possible   |
+| **Serializable**       | Prevented  | Prevented   | Prevented           | Prevented   | Prevented    | Prevented  |
+
+Above table provides a view of what isolation anomalies each isolation level solves. We covered Dirty Read, Lost Update and Write Skew in blog 4. We will cover the remaining anomalies as they become relevant through this blog series.
+
+The interesting thing is that READ COMMITTED doesn't solve for four of the isolation anomalies and REPEATABLE READ doesn't solve for two of the isolation anomalies. Yet these are the defaults that most production databases ship with and most organisations never change.
+
+### Default Isolation Level
+
+This brings me to the question: 
+> Why do default isolation levels not solve for so many of the isolation anomalies?
+
+This is because most applications don't hit these anomalies.
+
+Both Lost Update and Write Skew need a **read-then-write** pattern where two transactions concurrently read and then write to overlapping data. While read-then-write patterns are common in applications (check balance then transfer, check inventory then place order), two transactions hitting the same keys concurrently with this pattern is rare enough that most applications don't encounter these anomalies in practice.
+
+Both these anomalies can also be solved within weaker isolation levels by using **SELECT FOR UPDATE** queries. When we add `FOR UPDATE` in SELECT queries, the rows returned by SELECT query are locked as write-lock. This helps weaker isolation levels to also behave SERIALIZABLE where needed. For example, in the lost update scenario from blog 4, if both T1 and T2 used `SELECT balance FOR UPDATE` instead of a regular GET, the second transaction would block until the first commits, which helps prevent the lost update.
+
+Hence, the more common pattern on production is to follow a more pragmatic approach. It is to use the default weaker isolation which solves most problems rather than the strictest isolation level. And when the read-then-write patterns arise, they are solved by locking rows returned by SELECT query using `FOR UPDATE`.
+
+Let's start with implementing these default isolation levels.
 
 ## Read Committed
 
 ### No Dirty Reads
-The only guarantee provided by Read Committed is that there are no dirty (or uncommitted) reads. There are multiple isolation anomalies and we only walked through three of them in blog 4.
-
-Out of all the isolation anomalies, Read Committed only solves for one: dirty reads.
+The only guarantee provided by Read Committed is that there are no dirty (or uncommitted) reads and no dirty writes.
 
 In order to ensure that we are always reading committed data, we can keep an in-memory write buffer visible only to the respective transaction. Those values are only visible to other transactions post commit.
 
-If we correlate this to blog 4, this is very much similar to the 2 phase-locking which we implemented with the only difference being that we stop taking any read locks so that readers and writers are not blocked on each other.
+If we correlate this to blog 4, this is very much similar to the 2 phase-locking which we implemented with the only difference being that we stop taking any read locks so that readers and writers are not blocked on each other and instead only rely on write-locks.
 
 Let's do a dry-run to prove that this solves the dirty read isolation anomaly.
 ```
@@ -442,3 +463,20 @@ The only way to improve performance is to drop locks entirely
 
 
 PostgreSQL uses 32-bit transaction IDs and that IS a real problem. At high TPS, 32-bit wraps around in weeks. This is the infamous XID wraparound problem — PostgreSQL must run VACUUM to reclaim old XIDs, and if VACUUM falls behind, the database shuts down to prevent corruption. It's one of PostgreSQL's biggest operational headaches.
+
+## Isolation Levels and Anomalies
+
+|                        | Dirty Read | Dirty Write | Non-Repeatable Read | Lost Update | Phantom Read | Write Skew |
+|------------------------|------------|-------------|---------------------|-------------|--------------|------------|
+| **Read Uncommitted**   | Possible   | Prevented   | Possible            | Possible    | Possible     | Possible   |
+| **Read Committed**     | Prevented  | Prevented   | Possible            | Possible    | Possible     | Possible   |
+| **Repeatable Read**    | Prevented  | Prevented   | Prevented           | Prevented   | Possible     | Possible   |
+| **Serializable**       | Prevented  | Prevented   | Prevented           | Prevented   | Prevented    | Prevented  |
+
+Note: Repeatable Read in production databases is typically implemented using Snapshot Isolation (MVCC) with additional protections against lost updates — Postgres uses first-committer-wins detection, MySQL uses next-key locking. Our MVCC implementation provides the snapshot isolation foundation (preventing dirty reads, dirty writes, and non-repeatable reads) but does not yet include lost update prevention. Adding first-committer-wins detection would bring it to full Repeatable Read.
+
+### Isolation Level Tradeoff
+Note that this does not mean that the approach of using weaker isolation level + `FOR UPDATE` is the only correct and efficient way of solving isolation anomalies on production. Let's look at tradeoffs of the two possible approaches:
+
+**Serializable Snapshot Isolation (SSI)**
+Postgres implements an isolation level called Serializable Snapshot Isolation which provides the same isolation guarantees as the Serializable Isolation Level but with much lesser performance overhead than the traditional 2PL Serializable Isolation which we implemented in blog 4.
